@@ -1,0 +1,37 @@
+[project]
+name = "yt-amt-backend"
+version = "0.1.0"
+description = "YouTube audio -> stem separation -> melody transcription API"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "yt-dlp[default]",
+    "audio-separator[gpu]",
+    "basic-pitch",
+    "torch",
+    "torchaudio",
+    "librosa",
+    "soundfile",
+    "pretty_midi",
+    "huggingface_hub",
+]
+
+[tool.uv]
+package = false
+# basic-pitch는 번들된 ONNX 모델을 onnxruntime(-gpu)으로 실행하므로 tensorflow는 불필요
+override-dependencies = [
+    "tensorflow; sys_platform == 'never'",
+    "tensorflow-macos; sys_platform == 'never'",
+    "tflite-runtime; sys_platform == 'never'",
+    "coremltools; sys_platform == 'never'",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
