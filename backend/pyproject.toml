@@ -7,6 +7,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "python-multipart",  # file uploads
     "yt-dlp[default]",
     # CUDA build of onnxruntime on Windows/Linux, CPU build on macOS
     "audio-separator[gpu]; sys_platform != 'darwin'",

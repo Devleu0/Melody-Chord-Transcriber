@@ -32,14 +32,21 @@ export function HistoryPanel({ jobs, current, onOpen, onDelete, onClose }: Props
           const title = j.meta?.title ?? j.url
           return (
             <div key={j.id} className={`job ${j.id === current ? 'current' : ''}`}>
-              {j.meta?.thumbnail ? <img src={j.meta.thumbnail} alt="" loading="lazy" /> : <div className="thumb" />}
+              {j.meta?.thumbnail ? (
+                <img src={j.meta.thumbnail} alt="" loading="lazy" />
+              ) : (
+                <div className="thumb">{j.source === 'file' ? '🎵' : ''}</div>
+              )}
               <div className="job-body">
                 <div className="job-title" title={title}>
                   {title}
                 </div>
                 <div className="job-sub">
-                  <span className={`status ${j.status}`}>{t(`stage.${j.status}` as MsgKey)}</span>
+                  <span className={`status ${j.status}`}>
+                    {j.status === 'downloading' && j.source === 'file' ? t('stage.importing') : t(`stage.${j.status}` as MsgKey)}
+                  </span>
                   <span>{j.separator === 'roformer' ? 'RoFormer' : 'Demucs'}</span>
+                  {j.source === 'file' && <span>📎 {j.url}</span>}
                   <span>{new Date(j.created_at * 1000).toLocaleString(lang === 'ko' ? 'ko-KR' : 'en-US')}</span>
                 </div>
                 {done && (

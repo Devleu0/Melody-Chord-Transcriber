@@ -20,8 +20,9 @@ gpu_lock = threading.Lock()
 @dataclass
 class Job:
     id: str
-    url: str
+    url: str  # YouTube URL, or the original file name for uploads
     separator: str
+    source: str = "youtube"  # "youtube" | "file"
     status: str = "queued"
     message: str = "Queued"
     detail: str | None = None
@@ -68,11 +69,24 @@ class JobManager:
             self.jobs[job.id] = job
 
     def submit(self, url: str, separator: str) -> Job:
-        job = Job(id=uuid.uuid4().hex[:12], url=url, separator=separator)
+        job = self.create(url, separator)
+        self.enqueue(job)
+        return job
+
+    def create(self, url: str, separator: str, source: str = "youtube") -> Job:
+        """Register a job without queueing it (uploads write their file first)."""
+        job = Job(id=uuid.uuid4().hex[:12], url=url, separator=separator, source=source)
         job.save()
         self.jobs[job.id] = job
-        self.q.put(job.id)
         return job
+
+    def enqueue(self, job: Job) -> None:
+        self.q.put(job.id)
+
+    def discard(self, job: Job) -> None:
+        """Drop a job that was never queued (e.g. a failed upload)."""
+        self.jobs.pop(job.id, None)
+        shutil.rmtree(job.dir, ignore_errors=True)
 
     def delete(self, job_id: str) -> None:
         job = self.jobs.get(job_id)
@@ -105,13 +119,18 @@ class JobManager:
         # Lazy-import heavy modules in the worker (keeps server startup fast)
         from .pipeline.accomp import transcribe_poly
         from .pipeline.chords import recognize_chords
-        from .pipeline.download import download_audio
+        from .pipeline.download import download_audio, import_audio
         from .pipeline.export import analyze_beats
         from .pipeline.separate import separate
         from .pipeline.vocal import transcribe_vocal
 
-        self._update(job, "downloading", "Downloading YouTube audio", 0.05)
-        job.meta = download_audio(job.url, job.dir)
+        if job.source == "file":
+            self._update(job, "downloading", "Importing audio file", 0.05, detail="file")
+            upload = next(job.dir.glob("upload.*"))
+            job.meta = import_audio(upload, job.dir, title=Path(job.url).stem)
+        else:
+            self._update(job, "downloading", "Downloading YouTube audio", 0.05)
+            job.meta = download_audio(job.url, job.dir)
         source = job.dir / "source.wav"
 
         self._update(job, "separating", f"Separating sources ({job.separator})", 0.15, detail=job.separator)

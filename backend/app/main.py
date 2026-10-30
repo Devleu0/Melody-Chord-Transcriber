@@ -1,14 +1,24 @@
+import functools
 import subprocess
 from dataclasses import asdict
+from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import jobs
-from .config import DATA_DIR
+from .config import (
+    DATA_DIR,
+    GPU_SECONDS_PER_AUDIO_SECOND,
+    MAX_DURATION_SEC,
+    MAX_UPLOAD_BYTES,
+    MIN_DURATION_SEC,
+    UPLOAD_EXTS,
+    WARN_DURATION_SEC,
+)
 from .jobs import JobManager
 
 app = FastAPI(title="yt-amt")
@@ -55,6 +65,88 @@ def create_job(req: JobRequest):
     if not req.url.startswith(("http://", "https://")):
         raise HTTPException(400, "Invalid URL format")
     return _public(manager.submit(req.url, req.separator))
+
+
+class ProbeRequest(BaseModel):
+    url: str
+
+
+@functools.cache
+def _device() -> dict:
+    import torch  # deferred: importing torch takes a couple of seconds
+
+    if torch.cuda.is_available():
+        return {"device": "cuda", "gpu": torch.cuda.get_device_name(0)}
+    return {"device": "cpu", "gpu": None}
+
+
+@app.get("/api/info")
+def info():
+    """Limits and hardware, so the UI can validate input and estimate processing time."""
+    return {
+        **_device(),
+        "min_duration": MIN_DURATION_SEC,
+        "warn_duration": WARN_DURATION_SEC,
+        "max_duration": MAX_DURATION_SEC,
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "upload_exts": sorted(UPLOAD_EXTS),
+        "gpu_seconds_per_audio_second": GPU_SECONDS_PER_AUDIO_SECOND,
+    }
+
+
+def _duplicates(video_id: str | None) -> list[dict]:
+    """Earlier jobs for the same YouTube video (finished or still running)."""
+    from .pipeline.download import youtube_id
+
+    if not video_id:
+        return []
+    found = [
+        j for j in manager.jobs.values()
+        if j.status != "error" and (j.meta.get("video_id") or youtube_id(j.url)) == video_id
+    ]
+    found.sort(key=lambda j: j.created_at, reverse=True)
+    return [{"id": j.id, "separator": j.separator, "status": j.status, "created_at": j.created_at} for j in found]
+
+
+@app.post("/api/probe")
+def probe_url(req: ProbeRequest):
+    """Fetch title / duration / thumbnail without downloading, plus earlier jobs for the same video."""
+    from .pipeline.download import DownloadError, probe
+
+    if not req.url.startswith(("http://", "https://")):
+        raise HTTPException(400, "Invalid URL format")
+    try:
+        meta = probe(req.url)
+    except DownloadError as e:
+        raise HTTPException(422, str(e))
+    return {**meta, "duplicates": _duplicates(meta["video_id"])}
+
+
+@app.post("/api/jobs/upload")
+async def upload_job(file: UploadFile, separator: Literal["roformer", "demucs"] = Form("roformer")):
+    """Start a job from a local audio (or video) file instead of a YouTube link."""
+    name = Path(file.filename or "audio").name
+    ext = Path(name).suffix.lower()
+    if ext not in UPLOAD_EXTS:
+        raise HTTPException(400, f"Unsupported file type '{ext}'. Supported: {', '.join(sorted(UPLOAD_EXTS))}")
+    job = manager.create(name, separator, source="file")
+    # The stored name is fixed by the server; the original name is kept only as the job title
+    dest = job.dir / f"upload{ext}"
+    size = 0
+    try:
+        with open(dest, "wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, f"File is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+                f.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "Empty file")
+    except BaseException:
+        manager.discard(job)
+        raise
+    manager.enqueue(job)
+    return _public(job)
 
 
 @app.get("/api/jobs")

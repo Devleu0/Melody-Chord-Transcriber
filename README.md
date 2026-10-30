@@ -15,7 +15,7 @@ English · [한국어](README.ko.md)
 
 </div>
 
-yt-amt is a local web app for **automatic music transcription (AMT)**. It downloads the audio of a YouTube video, separates vocals from the accompaniment, transcribes the vocal melody, the accompaniment and the chord progression, and shows everything on a piano roll you can play, loop, slow down, edit and export.
+yt-amt is a local web app for **automatic music transcription (AMT)**. It takes a YouTube link or a local audio file, separates vocals from the accompaniment, transcribes the vocal melody, the accompaniment and the chord progression, and shows everything on a piano roll you can play, loop, slow down, edit and export.
 
 Everything runs on your machine. A 4 GB GPU is enough; CPU-only also works, just slower.
 
@@ -23,6 +23,7 @@ Everything runs on your machine. A 4 GB GPU is enough; CPU-only also works, just
 
 ## Features
 
+- **Input**: a YouTube link, or a local audio/video file (MP3, WAV, FLAC, M4A, OGG, Opus, MP4, …) picked with 📎 or dropped anywhere on the page.
 - **Source separation**: Mel-Band RoFormer (vocals / accompaniment) or Demucs `htdemucs_ft` (vocals / bass / other / drums).
 - **Vocal melody**: RMVPE pitch tracking, then note segmentation that handles vibrato and repeated notes. The continuous pitch curve is drawn over the notes.
 - **Accompaniment**: polyphonic transcription with Spotify's Basic Pitch.
@@ -42,6 +43,7 @@ Everything runs on your machine. A 4 GB GPU is enough; CPU-only also works, just
 ```mermaid
 flowchart LR
   A[YouTube URL] -->|yt-dlp + ffmpeg| B[source.wav]
+  U[Audio file] -->|upload + ffmpeg| B
   B -->|audio-separator<br/>Mel-RoFormer / Demucs| C[vocals.wav]
   B --> D[accompaniment.wav]
   C -->|RMVPE f0 → note segmentation| E[vocal notes + pitch curve]
@@ -93,7 +95,16 @@ npm run dev                        # http://localhost:5173
 
 ## Usage
 
-1. Paste a YouTube link, choose **RoFormer** (vocals + accompaniment) or **Demucs** (4 stems), and press **Transcribe**.
+1. Paste a YouTube link, or pick an audio file with 📎 (or drag it onto the page). A preview card shows the title, length and a rough processing-time estimate before anything is downloaded or uploaded. Choose **RoFormer** (vocals + accompaniment) or **Demucs** (4 stems), and press **Transcribe**.
+
+   | Input check | Result |
+   |---|---|
+   | shorter than 10 s, longer than 15 min, file over 300 MB, live stream, playlist-only link | blocked |
+   | 8–15 min | warning (slow, may run out of GPU memory) |
+   | non-YouTube link | warning (other yt-dlp sites are untested) |
+   | video already transcribed | offers to open the existing result |
+
+   The limits live in `backend/app/config.py`, and the server enforces them as well.
 2. When it finishes, press **Space** to play. Mute the mix and turn on a track's **Synth** to hear the transcription.
 3. Drag on the bar ruler, or click a chord, to set a loop. Use **Speed** to slow the loop down.
 4. Press **E** to edit. Changes save automatically and the MIDI files are regenerated.
@@ -119,6 +130,9 @@ npm run dev                        # http://localhost:5173
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/jobs` | `{url, separator: "roformer" \| "demucs"}` → job |
+| `POST` | `/api/jobs/upload` | multipart `file` + `separator` → job |
+| `POST` | `/api/probe` | `{url}` → title, duration, thumbnail, earlier jobs for the same video (no download) |
+| `GET` | `/api/info` | device (CUDA/CPU) and input limits |
 | `GET` | `/api/jobs`, `/api/jobs/{id}` | list / status |
 | `DELETE` | `/api/jobs/{id}` | delete a finished job and its files |
 | `GET` | `/api/jobs/{id}/result` | notes, pitch curve, beats, chords |

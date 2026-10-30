@@ -102,6 +102,119 @@ select {
   opacity: 0.5;
   cursor: default;
 }
+.file-chip {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--bg);
+  overflow: hidden;
+}
+.file-chip span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-chip small {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.file-chip button,
+.file-btn {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.file-btn {
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+.file-chip button:hover,
+.file-btn:hover {
+  background: var(--panel-2);
+}
+/* --- input preview card --- */
+.preview {
+  display: flex;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.preview img,
+.preview .thumb {
+  width: 112px;
+  height: 63px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--bg);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+.preview-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.preview-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-title.muted,
+.preview-meta {
+  color: var(--muted);
+  font-weight: 400;
+}
+.preview-meta {
+  font-size: 12px;
+}
+.preview-msg {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+.preview-msg.info {
+  color: #a5d8ff;
+}
+.preview-msg.warn {
+  color: #ffd8a8;
+}
+.preview-msg.error {
+  color: #ffa8a8;
+}
+.preview-msg small {
+  color: var(--muted);
+}
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 17, 21, 0.75);
+  border: 3px dashed var(--accent);
+  pointer-events: none;
+  font-size: 20px;
+  font-weight: 600;
+}
 .seg.lang button {
   padding: 6px 8px;
   font-size: 12px;
@@ -170,6 +283,12 @@ select {
   border-radius: 4px;
   background: var(--bg);
   flex-shrink: 0;
+}
+.job .thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
 }
 .job-body {
   flex: 1;

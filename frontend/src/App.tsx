@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
 import { AudioEngine, type LoopRange } from './audio/engine'
 import { HistoryPanel } from './components/HistoryPanel'
+import { InputPreview } from './components/InputPreview'
 import { PianoRoll, type PianoRollHandle } from './components/PianoRoll'
 import { TrackPanel } from './components/TrackPanel'
 import { useI18n, type MsgKey } from './i18n'
@@ -9,7 +10,8 @@ import { chordToNotes, leadSheet } from './music/chords'
 import { fmtTime, pitchName } from './music/format'
 import { beatIndex, makeGrid, snapTime, stepAt } from './music/grid'
 import { ALL_KEYS, detectKey, keyId, keyName, parseKeyId } from './music/key'
-import type { Job, Note, Result, Separator, TrackData, TrackState } from './types'
+import type { Job, Note, Result, Separator, ServerInfo, TrackData, TrackState } from './types'
+import { assess, classifyUrl, readAudioDuration, type Preview } from './validate'
 
 const TRACK_COLORS: Record<string, string> = {
   mix: '#adb5bd',
@@ -24,6 +26,11 @@ const TRACK_COLORS: Record<string, string> = {
 const ORDER = ['mix', 'chords', 'drums', 'accompaniment', 'bass', 'other', 'vocals']
 
 const STAGES: Job['status'][] = ['queued', 'downloading', 'separating', 'transcribing', 'chords', 'finalizing', 'done']
+
+// Must match UPLOAD_EXTS in backend/app/config.py
+const UPLOAD_EXTS = ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wma', '.aif', '.aiff', '.webm', '.mp4', '.mkv', '.mov']
+const fileExt = (name: string) => (name.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
+const fmtSize = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
 const SPEEDS = [0.5, 0.6, 0.75, 0.9, 1]
 const SNAPS = [0, 1, 2, 4]
@@ -61,6 +68,12 @@ export default function App() {
   const { t, lang, setLang } = useI18n()
   const trackLabel = useCallback((id: string) => t(`track.${id}` as MsgKey) ?? id, [t])
   const [url, setUrl] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [uploadPct, setUploadPct] = useState<number | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [info, setInfo] = useState<ServerInfo | null>(null)
+  const [preview, setPreview] = useState<Preview | null>(null)
   const [separator, setSeparator] = useState<Separator>('roformer')
   const [jobs, setJobs] = useState<Job[]>([])
   const [jobId, setJobId] = useState<string | null>(null)
@@ -116,7 +129,48 @@ export default function App() {
 
   useEffect(() => {
     void refreshJobs()
+    api.info().then(setInfo).catch(() => {})
   }, [refreshJobs])
+
+  // Check a pasted link (debounced): format first, then title / length / duplicates from the server
+  useEffect(() => {
+    if (file) return
+    const kind = classifyUrl(url)
+    if (kind === 'empty') {
+      setPreview(null)
+      return
+    }
+    if (kind === 'invalid') {
+      setPreview({ kind: 'url', urlKind: kind, loading: false, duration: null })
+      return
+    }
+    const ctrl = new AbortController()
+    const timer = window.setTimeout(() => {
+      setPreview({ kind: 'url', urlKind: kind, loading: true, duration: null })
+      api
+        .probe(url.trim(), ctrl.signal)
+        .then((r) =>
+          setPreview({
+            kind: 'url',
+            urlKind: kind,
+            loading: false,
+            title: r.title,
+            uploader: r.uploader,
+            thumbnail: r.thumbnail,
+            duration: r.duration || null,
+            isLive: r.is_live,
+            duplicates: r.duplicates,
+          }),
+        )
+        .catch((e: Error) => {
+          if (e.name !== 'AbortError') setPreview({ kind: 'url', urlKind: kind, loading: false, duration: null, error: e.message })
+        })
+    }, 600)
+    return () => {
+      window.clearTimeout(timer)
+      ctrl.abort()
+    }
+  }, [url, file])
 
   // Poll while a job is running
   useEffect(() => {
@@ -465,15 +519,75 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [togglePlay, seekTo, loop, loopOn, selected, editMode, editTrack, result, grid, undoRedo, quantize, onEditNote, changeLoop])
 
+  const pickFile = useCallback(
+    (f: File | undefined) => {
+      if (!f) return
+      if (!UPLOAD_EXTS.includes(fileExt(f.name))) {
+        setError(t('err.fileType', { ext: fileExt(f.name) || f.name }))
+        return
+      }
+      setError(null)
+      setFile(f)
+      // Read the length locally so long / short files are caught before uploading
+      setPreview({ kind: 'file', loading: true, title: f.name, size: f.size, duration: null })
+      void readAudioDuration(f).then((d) =>
+        setPreview((p) => (p?.kind === 'file' && p.title === f.name ? { ...p, loading: false, duration: d } : p)),
+      )
+    },
+    [t],
+  )
+
+  // Drag and drop an audio file anywhere on the page
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files')
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      setDragging(true)
+    }
+    const leave = (e: DragEvent) => {
+      if (e.relatedTarget === null) setDragging(false)
+    }
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      setDragging(false)
+      pickFile(e.dataTransfer?.files[0])
+    }
+    window.addEventListener('dragover', over)
+    window.addEventListener('dragleave', leave)
+    window.addEventListener('drop', drop)
+    return () => {
+      window.removeEventListener('dragover', over)
+      window.removeEventListener('dragleave', leave)
+      window.removeEventListener('drop', drop)
+    }
+  }, [pickFile])
+
+  const check = preview ? assess(preview, info, separator, t) : null
+  const blocked = !!check?.blocked
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (blocked) return
     setError(null)
     try {
-      const j = await api.createJob(url.trim(), separator)
+      let j: Job
+      if (file) {
+        setUploadPct(0)
+        j = await api.uploadJob(file, separator, setUploadPct)
+        setFile(null)
+      } else {
+        j = await api.createJob(url.trim(), separator)
+        setUrl('')
+      }
+      setPreview(null)
       setJobs((js) => [j, ...js])
       setJobId(j.id)
     } catch (err) {
       setError(String(err))
+    } finally {
+      setUploadPct(null)
     }
   }
 
@@ -493,16 +607,56 @@ export default function App() {
   const jobMessage = (j: Job) => {
     if (j.status === 'error') return t('msg.error', { error: j.error ?? '' })
     if (j.status === 'done') return ''
+    if (j.status === 'downloading' && j.source === 'file') return t('msg.importing')
     const detail = j.status === 'transcribing' && j.detail ? trackLabel(j.detail) : j.detail ?? ''
     return t(`msg.${j.status}` as MsgKey, { detail })
   }
+  const stageLabel = (j: Job, s: Job['status']) =>
+    s === 'downloading' && j.source === 'file' ? t('stage.importing') : t(`stage.${s}` as MsgKey)
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="logo">♪ yt-amt</div>
         <form className="url-form" onSubmit={submit}>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('app.placeholder')} required />
+          {file ? (
+            <div className="file-chip" title={file.name}>
+              <span>🎵 {file.name}</span>
+              <small>{fmtSize(file.size)}</small>
+              <button
+                type="button"
+                onClick={() => {
+                  setFile(null)
+                  setPreview(null)
+                }}
+                title={t('app.file.remove')}
+                aria-label={t('app.file.remove')}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('app.placeholder')} required />
+          )}
+          <button
+            type="button"
+            className="file-btn"
+            onClick={() => fileInput.current?.click()}
+            title={t('app.file.pick')}
+            aria-label={t('app.file.pick')}
+          >
+            📎
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            hidden
+            accept={['audio/*', 'video/*', ...UPLOAD_EXTS].join(',')}
+            onChange={(e) => {
+              pickFile(e.target.files?.[0])
+              e.target.value = ''
+            }}
+          />
           <div className="seg">
             <button type="button" className={separator === 'roformer' ? 'on' : ''} onClick={() => setSeparator('roformer')}>
               RoFormer <small>{t('app.sep.roformer')}</small>
@@ -511,8 +665,8 @@ export default function App() {
               Demucs <small>{t('app.sep.demucs')}</small>
             </button>
           </div>
-          <button className="primary" disabled={running}>
-            {t('app.start')}
+          <button className="primary" disabled={running || uploadPct !== null || blocked}>
+            {uploadPct !== null ? t('app.uploading', { pct: Math.round(uploadPct * 100) }) : t('app.start')}
           </button>
         </form>
         <button className="history-btn" onClick={() => setHistoryOpen(true)}>
@@ -528,6 +682,19 @@ export default function App() {
         </div>
       </header>
 
+      {preview && (
+        <InputPreview
+          preview={preview}
+          info={info}
+          separator={separator}
+          onOpenJob={(id) => {
+            setJobId(id)
+            setUrl('')
+            setPreview(null)
+          }}
+        />
+      )}
+
       {error && (
         <div className="banner error" onClick={() => setError(null)} title={t('app.dismiss')}>
           {error}
@@ -542,7 +709,7 @@ export default function App() {
                 key={s}
                 className={`stage ${STAGES.indexOf(s) < STAGES.indexOf(job.status) ? 'past' : ''} ${s === job.status ? 'cur' : ''}`}
               >
-                {t(`stage.${s}` as MsgKey)}
+                {stageLabel(job, s)}
               </span>
             ))}
           </div>
@@ -766,6 +933,12 @@ export default function App() {
       </main>
 
       <footer className="statusbar">{t('app.shortcuts')}</footer>
+
+      {dragging && (
+        <div className="drop-overlay">
+          <div>🎵 {t('app.drop')}</div>
+        </div>
+      )}
 
       {historyOpen && (
         <HistoryPanel

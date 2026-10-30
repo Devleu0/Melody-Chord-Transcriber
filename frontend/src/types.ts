@@ -4,6 +4,7 @@ export interface Job {
   id: string
   url: string
   separator: Separator
+  source?: 'youtube' | 'file' // url holds the original file name for uploads
   status: 'queued' | 'downloading' | 'separating' | 'transcribing' | 'chords' | 'finalizing' | 'done' | 'error'
   message: string
   detail?: string | null // e.g. separator name or track id being transcribed
@@ -11,6 +12,30 @@ export interface Job {
   error: string | null
   meta: { title?: string; uploader?: string; duration?: number; thumbnail?: string }
   created_at: number
+}
+
+/** GET /api/info */
+export interface ServerInfo {
+  device: 'cuda' | 'cpu'
+  gpu: string | null
+  min_duration: number
+  warn_duration: number
+  max_duration: number
+  max_upload_bytes: number
+  upload_exts: string[]
+  gpu_seconds_per_audio_second: Record<Separator, number>
+}
+
+/** POST /api/probe */
+export interface ProbeResult {
+  title: string | null
+  uploader: string | null
+  duration: number
+  thumbnail: string | null
+  webpage_url: string
+  video_id: string | null
+  is_live: boolean
+  duplicates: { id: string; separator: Separator; status: Job['status']; created_at: number }[]
 }
 
 export interface Note {
