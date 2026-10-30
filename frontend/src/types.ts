@@ -6,6 +6,7 @@ export interface Job {
   separator: Separator
   status: 'queued' | 'downloading' | 'separating' | 'transcribing' | 'chords' | 'finalizing' | 'done' | 'error'
   message: string
+  detail?: string | null // e.g. separator name or track id being transcribed
   progress: number
   error: string | null
   meta: { title?: string; uploader?: string; duration?: number; thumbnail?: string }
@@ -40,7 +41,7 @@ export interface Chord {
   end: number
   root: number // pitch class
   quality: Quality
-  bass: number | null // 전위 베이스 pitch class
+  bass: number | null // inversion bass pitch class
   pcs: number[]
 }
 
@@ -71,7 +72,7 @@ export interface Result {
   chords?: ChordResult
 }
 
-/** UI 상의 트랙 상태 (DAW 믹서). id 'chords' 는 코드 레인 전용 가상 트랙 */
+/** Track state in the UI (DAW mixer). id 'chords' is a virtual track for the chord lane */
 export interface TrackState {
   id: string
   label: string

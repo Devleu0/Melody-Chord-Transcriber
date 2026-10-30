@@ -1,7 +1,7 @@
-/** 박 격자: 감지된 비트를 곡 시작/끝까지 평균 간격으로 연장한 전체 비트 목록. */
+/** Beat grid: detected beats extended to the song start/end at the average interval. */
 export interface BeatGrid {
-  beats: number[] // 0 이하 ~ duration 이상까지 연장된 비트
-  firstIndex: number // 원래 비트[0] 의 인덱스 (마디 번호 기준점)
+  beats: number[] // beats extended from <= 0 to >= duration
+  firstIndex: number // index of the original beat[0] (bar numbering origin)
   period: number
 }
 
@@ -20,7 +20,7 @@ export function makeGrid(detected: number[], duration: number): BeatGrid {
   return { beats: [...before, ...detected, ...after], firstIndex: before.length, period }
 }
 
-/** t 가 속한 비트 구간의 시작 인덱스 */
+/** Start index of the beat interval containing t */
 export function beatIndex(grid: BeatGrid, t: number): number {
   const b = grid.beats
   let lo = 0
@@ -33,7 +33,7 @@ export function beatIndex(grid: BeatGrid, t: number): number {
   return lo
 }
 
-/** 박을 div 등분한 격자 중 가장 가까운 위치 (div=0 이면 그대로) */
+/** Nearest position on the grid dividing each beat into div parts (unchanged if div=0) */
 export function snapTime(grid: BeatGrid, t: number, div: number): number {
   if (div <= 0) return t
   const i = beatIndex(grid, t)
@@ -43,7 +43,7 @@ export function snapTime(grid: BeatGrid, t: number, div: number): number {
   return b0 + Math.round((t - b0) / step) * step
 }
 
-/** t 위치의 한 칸(박/div) 길이 */
+/** Length of one grid cell (beat/div) at t */
 export function stepAt(grid: BeatGrid, t: number, div: number): number {
   const i = beatIndex(grid, t)
   const b0 = grid.beats[i]

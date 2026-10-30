@@ -6,7 +6,7 @@ import pretty_midi
 
 GM_PROGRAMS = {"vocals": 0, "accompaniment": 0, "other": 0, "bass": 33, "chords": 0}
 
-# 악보/MusicXML 용 근음 표기 (대중음악에서 흔한 철자)
+# Root spellings for sheet music / MusicXML (common in popular music)
 ROOT_NAMES = ["C", "D-", "D", "E-", "E", "F", "F#", "G", "A-", "A", "B-", "B"]
 M21_SUFFIX = {
     "maj": "", "min": "m", "dim": "dim", "aug": "+", "min6": "m6", "maj6": "6", "min7": "m7",
@@ -15,7 +15,7 @@ M21_SUFFIX = {
 
 
 def analyze_beats(wav: Path) -> dict:
-    """타임라인 격자용 템포/비트 위치."""
+    """Tempo / beat positions for the timeline grid."""
     y, sr = librosa.load(str(wav), sr=22050, mono=True)
     tempo, beats = librosa.beat.beat_track(y=y, sr=sr, units="time")
     tempo = float(tempo[0] if hasattr(tempo, "__len__") else tempo)
@@ -23,7 +23,7 @@ def analyze_beats(wav: Path) -> dict:
 
 
 def chord_voicing(chord: dict) -> list[int]:
-    """코드 구성음을 C3~ 대역에 배치 (베이스음이 있으면 맨 아래)."""
+    """Voice chord tones from C3 upward (bass note at the bottom if present)."""
     base = 48 + chord["root"]
     pitches = sorted(base + ((pc - chord["root"]) % 12) for pc in chord["pcs"])
     if chord.get("bass") is not None:
@@ -48,10 +48,10 @@ def write_midi(tracks: dict[str, list[dict]], path: Path, tempo: float = 120.0, 
 
 
 def _beat_mapper(beats: list[float]):
-    """초 -> 박 위치(실수). 비트 밖은 평균 간격으로 외삽."""
+    """Seconds -> beat position (float). Extrapolates outside the beats using the mean interval."""
     b = np.asarray(beats, dtype=float)
     if len(b) < 2:
-        return lambda t: t * 2.0  # 비트 없음: 120 BPM 가정
+        return lambda t: t * 2.0  # No beats: assume 120 BPM
     period = float(np.median(np.diff(b)))
 
     def f(t: float) -> float:
@@ -65,12 +65,12 @@ def _beat_mapper(beats: list[float]):
 
 
 def write_musicxml(notes: list[dict], chords: list[dict], beats: list[float], tempo: float, title: str, path: Path) -> None:
-    """단선율(보컬) + 코드 심볼 리드시트. 박 격자 기준 16분음표로 정량화."""
+    """Lead sheet: monophonic (vocal) melody + chord symbols. Quantized to 16th notes on the beat grid."""
     from music21 import harmony, metadata, meter, note, stream
     from music21 import tempo as m21tempo
 
     to_beat = _beat_mapper(beats)
-    # 첫 비트 이전(픽업)을 위해 마디 단위로 오프셋을 민다 (비트 0 = 첫 마디 첫 박 유지)
+    # Offset by whole measures to fit a pickup before the first beat (beat 0 stays the downbeat of a measure)
     shift = 4 * int(np.ceil(max(0.0, -to_beat(0.0)) / 4))
 
     def q(t: float) -> float:
@@ -80,7 +80,7 @@ def write_musicxml(notes: list[dict], chords: list[dict], beats: list[float], te
     part.append(meter.TimeSignature("4/4"))
     part.append(m21tempo.MetronomeMark(number=round(tempo)))
 
-    # 단선율로 정리: 겹치면 앞 음을 자른다
+    # Make monophonic: truncate the earlier note on overlap
     events: list[tuple[float, float, int]] = []
     for n in sorted(notes, key=lambda n: n["start"]):
         s, e = q(n["start"]), q(n["end"])

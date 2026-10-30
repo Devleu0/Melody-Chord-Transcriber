@@ -1,5 +1,5 @@
 # Vendored from https://github.com/jayg996/BTC-ISMIR19 (MIT License, see LICENSE)
-# 원본 btc_model.py 에서 HParams / __main__ 만 제거
+# Only HParams / __main__ removed from the original btc_model.py
 from .transformer_modules import *
 from .transformer_modules import _gen_timing_signal, _gen_bias_mask
 

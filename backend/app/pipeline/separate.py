@@ -7,7 +7,7 @@ import soundfile as sf
 
 from ..config import MODELS_DIR, SEPARATORS
 
-# audio-separator 출력 파일명의 "(Vocals)" 같은 stem 표기 -> 우리 트랙 id
+# Stem labels like "(Vocals)" in audio-separator output filenames -> our track id
 STEM_IDS = {
     "vocals": "vocals",
     "instrumental": "accompaniment",
@@ -18,7 +18,7 @@ STEM_IDS = {
 
 
 def separate(source: Path, stems_dir: Path, engine: str) -> dict[str, Path]:
-    """source.wav 를 분리해 {track_id: wav_path} 반환. 반주(accompaniment)는 항상 포함된다."""
+    """Separate source.wav and return {track_id: wav_path}. The accompaniment is always included."""
     from audio_separator.separator import Separator
 
     stems_dir.mkdir(parents=True, exist_ok=True)
@@ -27,7 +27,7 @@ def separate(source: Path, stems_dir: Path, engine: str) -> dict[str, Path]:
         model_file_dir=str(MODELS_DIR),
         output_dir=str(stems_dir),
         output_format="WAV",
-        # 4GB VRAM 대응: demucs shift 수를 줄여 속도/메모리 절약
+        # For 4GB VRAM: fewer demucs shifts to save time/memory
         demucs_params={"segment_size": "Default", "shifts": 1, "overlap": 0.25, "segments_enabled": True},
     )
     sep.load_model(model_filename=SEPARATORS[engine])
@@ -50,10 +50,10 @@ def separate(source: Path, stems_dir: Path, engine: str) -> dict[str, Path]:
         stems[stem] = target
 
     if "vocals" not in stems:
-        raise RuntimeError(f"보컬 stem 을 찾지 못했습니다: {outputs}")
+        raise RuntimeError(f"Vocal stem not found: {outputs}")
 
     if "accompaniment" not in stems and not ({"drums", "bass"} & stems.keys()) and "other" in stems:
-        # 2-stem 모델 중 일부(Kim Mel-RoFormer)는 반주를 "(Other)"로 출력
+        # Some 2-stem models (Kim Mel-RoFormer) output the accompaniment as "(Other)"
         target = stems_dir / "accompaniment.wav"
         target.unlink(missing_ok=True)
         stems["other"].rename(target)
@@ -61,7 +61,7 @@ def separate(source: Path, stems_dir: Path, engine: str) -> dict[str, Path]:
         del stems["other"]
 
     if "accompaniment" not in stems:
-        # demucs: 보컬 외 stem 합 = 반주 (재생용)
+        # demucs: sum of non-vocal stems = accompaniment (for playback)
         parts = [sf.read(stems[k], dtype="float32") for k in ("drums", "bass", "other") if k in stems]
         sr = parts[0][1]
         n = min(len(p[0]) for p in parts)

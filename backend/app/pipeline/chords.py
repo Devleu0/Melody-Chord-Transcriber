@@ -1,8 +1,8 @@
-"""코드 진행 인식.
+"""Chord progression recognition.
 
-주 엔진: BTC (Park et al., ISMIR 2019, large vocabulary 170 클래스)
-예비 엔진: CQT 크로마 + 장/단 3화음 템플릿
-두 엔진 모두 비트 단위로 확률을 모은 뒤 Viterbi 로 평활화하고, 베이스음으로 전위를 판정한다.
+Primary engine: BTC (Park et al., ISMIR 2019, large vocabulary, 170 classes)
+Fallback engine: CQT chroma + major/minor triad templates
+Both engines pool probabilities per beat, smooth them with Viterbi, and detect inversions from the bass note.
 """
 import hashlib
 import logging
@@ -23,7 +23,7 @@ BTC_SHA256 = "1673d23f8f9a55ae7f9e8b80a51da616debb22675b8d8b67ea6ce0ef37b0ab51"
 BTC_SR = 22050
 BTC_HOP = 2048
 BTC_TIMESTEP = 108
-BTC_FPS = BTC_TIMESTEP / 10.0  # 원본 구현과 동일 (inst_len 10초 / 108 프레임)
+BTC_FPS = BTC_TIMESTEP / 10.0  # Same as the original implementation (inst_len 10 s / 108 frames)
 
 QUALITIES = ["min", "maj", "dim", "aug", "min6", "maj6", "min7", "minmaj7", "maj7", "7", "dim7", "hdim7", "sus2", "sus4"]
 INTERVALS = {
@@ -46,7 +46,7 @@ N_CLASS = 169  # BTC: 168 = X(unknown), 169 = N(no chord)
 
 
 def _btc_label(idx: int) -> tuple[int | None, str | None]:
-    """BTC 클래스 -> (root pitch class, quality). N/X 는 (None, None)."""
+    """BTC class -> (root pitch class, quality). N/X map to (None, None)."""
     if idx >= 168:
         return None, None
     return idx // 14, QUALITIES[idx % 14]
@@ -65,7 +65,7 @@ def _load_btc():
             urllib.request.urlretrieve(BTC_URL, BTC_PATH)
         digest = hashlib.sha256(BTC_PATH.read_bytes()).hexdigest()
         if digest != BTC_SHA256:
-            raise RuntimeError(f"BTC 가중치 해시 불일치: {digest}")
+            raise RuntimeError(f"BTC weight hash mismatch: {digest}")
         config = {
             "feature_size": 144,
             "timestep": BTC_TIMESTEP,
@@ -84,8 +84,8 @@ def _load_btc():
             "probs_out": False,
         }
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        # pickle 임의 코드 실행 방지: 텐서 + numpy 스칼라(mean/std)만 허용
-        # 체크포인트는 numpy 1.x 로 저장되어 numpy.core.* 경로를 참조한다
+        # Prevent arbitrary code execution via pickle: allow only tensors + numpy scalars (mean/std)
+        # The checkpoint was saved with numpy 1.x, so it references numpy.core.* paths
         safe = [
             (np._core.multiarray.scalar, "numpy.core.multiarray.scalar"),
             (np._core.multiarray._reconstruct, "numpy.core.multiarray._reconstruct"),
@@ -105,9 +105,9 @@ def _load_btc():
 
 
 def _btc_probs(y: np.ndarray) -> tuple[np.ndarray, float]:
-    """(frames, 170) 확률과 초당 프레임 수."""
+    """(frames, 170) probabilities and frames per second."""
     model, mean, std, device = _load_btc()
-    # 원본과 동일하게 10초 단위 CQT 이어붙이기
+    # Concatenate CQT in 10 s chunks, same as the original
     seg = int(BTC_SR * 10.0)
     feats = [
         librosa.cqt(y[i : i + seg], sr=BTC_SR, n_bins=144, bins_per_octave=24, hop_length=BTC_HOP)
@@ -130,7 +130,7 @@ def _btc_probs(y: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 def _template_probs(y: np.ndarray) -> tuple[np.ndarray, float, list[tuple[int | None, str | None]]]:
-    """예비: 크로마-템플릿 유사도를 확률처럼 사용 (장/단 24 + N)."""
+    """Fallback: use chroma-template similarity as pseudo-probabilities (24 major/minor + N)."""
     hop = 2048
     chroma = librosa.feature.chroma_cqt(y=y, sr=BTC_SR, hop_length=hop).T  # (T, 12)
     labels: list[tuple[int | None, str | None]] = []
@@ -146,7 +146,7 @@ def _template_probs(y: np.ndarray) -> tuple[np.ndarray, float, list[tuple[int | 
     energy = chroma.sum(1, keepdims=True)
     sim = (chroma / np.maximum(np.linalg.norm(chroma, axis=1, keepdims=True), 1e-9)) @ T.T
     no_chord = np.where(energy < 0.5, 1.0, 0.3)
-    # 코사인 유사도 차이가 작아 대비를 크게 줘야 Viterbi 변경 패널티를 넘을 수 있다
+    # Cosine similarity differences are small, so boost the contrast to overcome the Viterbi change penalty
     scores = np.concatenate([sim, no_chord], axis=1) * 25
     probs = np.exp(scores - scores.max(1, keepdims=True))
     probs /= probs.sum(1, keepdims=True)
@@ -154,7 +154,7 @@ def _template_probs(y: np.ndarray) -> tuple[np.ndarray, float, list[tuple[int | 
 
 
 def _beat_sync(probs: np.ndarray, fps: float, bounds: np.ndarray) -> np.ndarray:
-    """프레임 확률을 비트 구간 평균으로."""
+    """Average frame probabilities over beat intervals."""
     out = []
     for a, b in zip(bounds[:-1], bounds[1:]):
         i0, i1 = int(a * fps), max(int(a * fps) + 1, int(b * fps))
@@ -163,7 +163,7 @@ def _beat_sync(probs: np.ndarray, fps: float, bounds: np.ndarray) -> np.ndarray:
 
 
 def _viterbi(probs: np.ndarray, change_penalty: float) -> np.ndarray:
-    """코드가 바뀔 때 고정 패널티를 주는 Viterbi (구간마다 최적 경로)."""
+    """Viterbi with a fixed penalty on chord changes (optimal path per segment)."""
     logp = np.log(probs + 1e-9)
     n, k = logp.shape
     score = logp[0].copy()
@@ -182,7 +182,7 @@ def _viterbi(probs: np.ndarray, change_penalty: float) -> np.ndarray:
 
 
 def _bass_pc(bass_notes: list[dict], start: float, end: float) -> int | None:
-    """구간에서 가장 오래 울린 저음 pitch class (구간 길이의 40% 이상일 때만)."""
+    """Bass pitch class sounding longest in the segment (only if it covers at least 40% of it)."""
     weight = np.zeros(12)
     for n in bass_notes:
         overlap = min(end, n["end"]) - max(start, n["start"])
@@ -206,15 +206,15 @@ def recognize_chords(
         labels = [_btc_label(i) for i in range(170)]
         engine = "btc"
     except Exception:
-        log.exception("BTC 실패, 템플릿 엔진으로 대체")
+        log.exception("BTC failed, falling back to the template engine")
         probs, fps, labels = _template_probs(y)
         engine = "template"
 
-    # 비트가 없으면 0.5초 격자
+    # No beats: use a 0.5 s grid
     grid = np.array(beats) if len(beats) > 1 else np.arange(0, duration, 0.5)
     bounds = np.unique(np.concatenate([[0.0], grid[grid < duration], [duration]]))
     bounds = bounds[np.concatenate([[True], np.diff(bounds) > 0.05])]
-    # 템플릿 엔진은 확률 대비가 약해 패널티를 낮춘다
+    # The template engine has weak probability contrast, so lower the penalty
     penalty = change_penalty if engine == "btc" else change_penalty * 0.5
     path = _viterbi(_beat_sync(probs, fps, bounds), penalty)
 
@@ -234,7 +234,7 @@ def recognize_chords(
                 "end": round(end, 3),
                 "root": root,
                 "quality": quality,
-                # 근음이 아닌 구성음이 베이스면 전위 (C/E). 비구성음 베이스는 무시
+                # A non-root chord tone in the bass means an inversion (C/E). Non-chord bass notes are ignored
                 "bass": bass if bass is not None and bass != root and bass in pcs else None,
                 "pcs": pcs,
             })

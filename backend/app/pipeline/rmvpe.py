@@ -1,7 +1,7 @@
-"""RMVPE 보컬 피치 추출 (Wei et al., 2023).
+"""RMVPE vocal pitch extraction (Wei et al., 2023).
 
-모델 구조는 RVC(Retrieval-based-Voice-Conversion) 공개 구현과 동일하며,
-가중치는 HuggingFace lj1995/VoiceConversionWebUI 의 rmvpe.pt 를 사용한다.
+The model architecture matches the public RVC (Retrieval-based-Voice-Conversion) implementation,
+and the weights are rmvpe.pt from HuggingFace lj1995/VoiceConversionWebUI.
 """
 import librosa
 import numpy as np
@@ -188,7 +188,7 @@ class RMVPE:
 
     @torch.no_grad()
     def salience(self, audio16k: np.ndarray, chunk: int = 32 * 100, ctx: int = 64) -> np.ndarray:
-        """(frames, 360) salience. 4GB VRAM 대응으로 ~32초 단위 청크 + 앞뒤 문맥 겹침 처리."""
+        """(frames, 360) salience. Processed in ~32 s chunks with overlapping context on both sides to fit 4GB VRAM."""
         audio = torch.from_numpy(audio16k).float().to(self.device)
         mel = self._mel(audio).unsqueeze(0)  # (1, 128, T)
         n = mel.shape[-1]
@@ -206,7 +206,7 @@ class RMVPE:
 
     @staticmethod
     def decode(salience: np.ndarray, threshold: float = 0.03) -> tuple[np.ndarray, np.ndarray]:
-        """salience -> (f0_hz, confidence). 무성 구간 f0=0."""
+        """salience -> (f0_hz, confidence). f0=0 in unvoiced regions."""
         center = np.argmax(salience, axis=1)
         conf = np.max(salience, axis=1)
         padded = np.pad(salience, ((0, 0), (4, 4)))

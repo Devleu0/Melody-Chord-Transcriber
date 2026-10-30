@@ -4,42 +4,29 @@ import { AudioEngine, type LoopRange } from './audio/engine'
 import { HistoryPanel } from './components/HistoryPanel'
 import { PianoRoll, type PianoRollHandle } from './components/PianoRoll'
 import { TrackPanel } from './components/TrackPanel'
+import { useI18n, type MsgKey } from './i18n'
 import { chordToNotes, leadSheet } from './music/chords'
 import { fmtTime, pitchName } from './music/format'
 import { beatIndex, makeGrid, snapTime, stepAt } from './music/grid'
 import { ALL_KEYS, detectKey, keyId, keyName, parseKeyId } from './music/key'
 import type { Job, Note, Result, Separator, TrackData, TrackState } from './types'
 
-const TRACK_META: Record<string, { label: string; color: string }> = {
-  mix: { label: '원곡', color: '#adb5bd' },
-  chords: { label: '코드', color: '#b197fc' },
-  vocals: { label: '보컬', color: '#ff6b8b' },
-  accompaniment: { label: '반주', color: '#4dabf7' },
-  bass: { label: '베이스', color: '#ffd43b' },
-  other: { label: '기타 악기', color: '#69db7c' },
-  drums: { label: '드럼', color: '#868e96' },
+const TRACK_COLORS: Record<string, string> = {
+  mix: '#adb5bd',
+  chords: '#b197fc',
+  vocals: '#ff6b8b',
+  accompaniment: '#4dabf7',
+  bass: '#ffd43b',
+  other: '#69db7c',
+  drums: '#868e96',
 }
-// 피아노롤에서 아래→위 순서로 그려짐 (보컬이 맨 위)
+// Draw order in the piano roll, bottom to top (vocals on top)
 const ORDER = ['mix', 'chords', 'drums', 'accompaniment', 'bass', 'other', 'vocals']
 
 const STAGES: Job['status'][] = ['queued', 'downloading', 'separating', 'transcribing', 'chords', 'finalizing', 'done']
-const STAGE_LABEL: Record<string, string> = {
-  queued: '대기',
-  downloading: '다운로드',
-  separating: '음원 분리',
-  transcribing: '채보',
-  chords: '코드 분석',
-  finalizing: '마무리',
-  done: '완료',
-}
 
 const SPEEDS = [0.5, 0.6, 0.75, 0.9, 1]
-const SNAPS = [
-  { div: 0, label: '스냅 끔' },
-  { div: 1, label: '1박' },
-  { div: 2, label: '1/2박' },
-  { div: 4, label: '1/4박' },
-]
+const SNAPS = [0, 1, 2, 4]
 const PEAKS_RATE = 200
 
 function loadPref<T>(key: string, fallback: T): T {
@@ -55,7 +42,7 @@ function savePref(key: string, value: unknown) {
   try {
     localStorage.setItem(`yt-amt.${key}`, JSON.stringify(value))
   } catch {
-    /* 저장 불가 환경 */
+    /* storage unavailable */
   }
 }
 
@@ -71,6 +58,8 @@ function download(name: string, text: string) {
 type SaveState = 'saved' | 'pending' | 'saving' | 'error'
 
 export default function App() {
+  const { t, lang, setLang } = useI18n()
+  const trackLabel = useCallback((id: string) => t(`track.${id}` as MsgKey) ?? id, [t])
   const [url, setUrl] = useState('')
   const [separator, setSeparator] = useState<Separator>('roformer')
   const [jobs, setJobs] = useState<Job[]>([])
@@ -99,7 +88,7 @@ export default function App() {
   const [peaks, setPeaks] = useState<Float32Array | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
-  // 편집
+  // Editing
   const [editMode, setEditMode] = useState(false)
   const [editTrack, setEditTrack] = useState<string | null>('vocals')
   const [snapDiv, setSnapDiv] = useState(() => loadPref('snapDiv', 4))
@@ -115,9 +104,9 @@ export default function App() {
   const chords = result?.chords?.chords ?? []
 
   const grid = useMemo(() => makeGrid(result?.beats ?? [], duration || 1), [result?.beats, duration])
-  // 전체 채보 노트로 조성 추정
+  // Estimate the key from every transcribed note
   const detectedKey = useMemo(
-    () => (result ? detectKey(result.tracks.flatMap((t) => t.notes ?? [])) : null),
+    () => (result ? detectKey(result.tracks.flatMap((tr) => tr.notes ?? [])) : null),
     [result],
   )
   const scaleKey = keyChoice === 'off' ? null : keyChoice === 'auto' ? detectedKey : parseKeyId(keyChoice)
@@ -129,14 +118,14 @@ export default function App() {
     void refreshJobs()
   }, [refreshJobs])
 
-  // 진행 중 작업 폴링
+  // Poll while a job is running
   useEffect(() => {
     if (!running) return
-    const t = window.setInterval(refreshJobs, 1000)
-    return () => window.clearInterval(t)
+    const timer = window.setInterval(refreshJobs, 1000)
+    return () => window.clearInterval(timer)
   }, [running, refreshJobs])
 
-  // --- 저장 (편집 후 자동) ---
+  // --- Autosave after edits ---
   const flushSave = useCallback(async () => {
     window.clearTimeout(saveTimer.current)
     const r = resultRef.current
@@ -146,16 +135,16 @@ export default function App() {
     setSaveState('saving')
     try {
       for (const id of tracks) {
-        const notes = r.tracks.find((t) => t.id === id)?.notes
+        const notes = r.tracks.find((tr) => tr.id === id)?.notes
         if (notes) await api.saveNotes(r.job_id, id, notes)
       }
       setSaveState(pendingSave.current.size ? 'pending' : 'saved')
     } catch (e) {
       tracks.forEach((id) => pendingSave.current.add(id))
       setSaveState('error')
-      setError(`저장 실패: ${e}`)
+      setError(t('err.save', { e: String(e) }))
     }
-  }, [])
+  }, [t])
 
   const scheduleSave = useCallback(
     (track: string) => {
@@ -167,18 +156,18 @@ export default function App() {
     [flushSave],
   )
 
-  /** 트랙 데이터 교체 (+실행 취소 기록) */
+  /** Replace a track's data (and record it for undo) */
   const replaceTrack = useCallback((track: string, patch: Partial<TrackData>, record = true) => {
     const r = resultRef.current
     if (!r) return
-    const prev = r.tracks.find((t) => t.id === track)
+    const prev = r.tracks.find((tr) => tr.id === track)
     if (!prev?.notes) return
     if (record) {
       undoStack.current.push({ track, notes: prev.notes })
       if (undoStack.current.length > 200) undoStack.current.shift()
       redoStack.current = []
     }
-    const next = { ...r, tracks: r.tracks.map((t) => (t.id === track ? { ...t, ...patch } : t)) }
+    const next = { ...r, tracks: r.tracks.map((tr) => (tr.id === track ? { ...tr, ...patch } : tr)) }
     resultRef.current = next
     setResult(next)
     setStackVersion((v) => v + 1)
@@ -194,7 +183,7 @@ export default function App() {
 
   const onEditNote = useCallback(
     (track: string, before: Note | null, after: Note | null) => {
-      const notes = resultRef.current?.tracks.find((t) => t.id === track)?.notes
+      const notes = resultRef.current?.tracks.find((tr) => tr.id === track)?.notes
       if (!notes) return
       const next = before ? notes.filter((n) => n !== before) : [...notes]
       if (after) next.push(after)
@@ -211,7 +200,7 @@ export default function App() {
       const entry = from.pop()
       const r = resultRef.current
       if (!entry || !r) return
-      const cur = r.tracks.find((t) => t.id === entry.track)?.notes ?? []
+      const cur = r.tracks.find((tr) => tr.id === entry.track)?.notes ?? []
       to.push({ track: entry.track, notes: cur })
       replaceTrack(entry.track, { notes: entry.notes, edited: true }, false)
       scheduleSave(entry.track)
@@ -222,7 +211,7 @@ export default function App() {
 
   const quantize = useCallback(() => {
     const r = resultRef.current
-    const notes = r?.tracks.find((t) => t.id === editTrack)?.notes
+    const notes = r?.tracks.find((tr) => tr.id === editTrack)?.notes
     if (!editTrack || !notes || !snapDiv) return
     editNotes(
       editTrack,
@@ -236,7 +225,7 @@ export default function App() {
     setSelected(null)
   }, [editTrack, snapDiv, grid, editNotes])
 
-  // --- 결과 로드 ---
+  // --- Load a finished job ---
   useEffect(() => {
     if (!job || job.status !== 'done' || result?.job_id === job.id) return
     let cancelled = false
@@ -262,17 +251,17 @@ export default function App() {
       setEditMode(false)
       undoStack.current = []
       redoStack.current = []
-      const ids = ['chords', ...res.tracks.map((t) => t.id)]
+      const ids = ['chords', ...res.tracks.map((tr) => tr.id)]
       const sorted = ids.sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b))
       setStates(
         sorted.map((id) => {
-          const t = res.tracks.find((d) => d.id === id)
+          const tr = res.tracks.find((d) => d.id === id)
           return {
             id,
-            label: TRACK_META[id]?.label ?? id,
-            color: TRACK_META[id]?.color ?? '#ced4da',
-            hasNotes: !!t?.notes,
-            showNotes: id === 'chords' || !!t?.notes,
+            label: id,
+            color: TRACK_COLORS[id] ?? '#ced4da',
+            hasNotes: !!tr?.notes,
+            showNotes: id === 'chords' || !!tr?.notes,
             audioOn: id === 'mix',
             solo: false,
             volume: id === 'chords' ? 0.6 : 0.9,
@@ -282,7 +271,7 @@ export default function App() {
       )
       setLoadingAudio(true)
       try {
-        await Promise.all(res.tracks.map((t) => eng.loadAudio(t.id, api.fileUrl(res.job_id, t.audio))))
+        await Promise.all(res.tracks.map((tr) => eng.loadAudio(tr.id, api.fileUrl(res.job_id, tr.audio))))
         if (cancelled) return
         setDuration(eng.duration)
         setPeaks(eng.peaks('mix', PEAKS_RATE))
@@ -296,14 +285,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id, job?.status])
 
-  // 채보/코드 → 엔진 신스 노트
+  // Transcribed notes and chords -> engine synth tracks
   useEffect(() => {
     if (!engine || !result) return
-    for (const t of result.tracks) if (t.notes) engine.setNotes(t.id, t.notes)
+    for (const tr of result.tracks) if (tr.notes) engine.setNotes(tr.id, tr.notes)
     engine.setNotes('chords', chordToNotes(result.chords?.chords ?? []))
   }, [engine, result])
 
-  // 믹서 상태 → 엔진 게인
+  // Mixer state -> engine gains
   useEffect(() => {
     if (!engine || loadingAudio) return
     const anySolo = states.some((s) => s.solo)
@@ -333,9 +322,9 @@ export default function App() {
     setError(null)
     try {
       const urls = new Map(
-        result.tracks.map((t) => [
-          t.id,
-          next === 1 ? api.fileUrl(result.job_id, t.audio) : api.stretchUrl(result.job_id, t.audio, next),
+        result.tracks.map((tr) => [
+          tr.id,
+          next === 1 ? api.fileUrl(result.job_id, tr.audio) : api.stretchUrl(result.job_id, tr.audio, next),
         ]),
       )
       await eng.setRate(next, urls)
@@ -358,7 +347,7 @@ export default function App() {
       replaceTrack(track, { notes: data.notes, pitch_curve: data.pitch_curve, params: data.params, edited: false })
       setSelected(null)
     } catch (e) {
-      setError(`재채보 실패: ${e}`)
+      setError(t('err.retranscribe', { e: String(e) }))
     } finally {
       setBusy(null)
     }
@@ -375,7 +364,7 @@ export default function App() {
       resultRef.current = next
       setResult(next)
     } catch (e) {
-      setError(`코드 분석 실패: ${e}`)
+      setError(t('err.chords', { e: String(e) }))
     } finally {
       setBusy(null)
     }
@@ -393,7 +382,7 @@ export default function App() {
       }
       await refreshJobs()
     } catch (e) {
-      setError(`삭제 실패: ${e}`)
+      setError(t('err.delete', { e: String(e) }))
     }
   }
 
@@ -402,11 +391,11 @@ export default function App() {
     setLoopOn(!!r)
   }, [])
 
-  // 시간 표시 갱신
+  // Refresh the time readout while playing
   useEffect(() => {
     if (!playing) return
-    const t = window.setInterval(() => setTime(engineRef.current?.currentTime ?? 0), 100)
-    return () => window.clearInterval(t)
+    const timer = window.setInterval(() => setTime(engineRef.current?.currentTime ?? 0), 100)
+    return () => window.clearInterval(timer)
   }, [playing])
 
   const togglePlay = useCallback(() => {
@@ -422,12 +411,12 @@ export default function App() {
     setTime(eng.currentTime)
   }, [loadingAudio])
 
-  const seekTo = useCallback((t: number) => {
-    engineRef.current?.seek(t)
-    setTime(engineRef.current?.currentTime ?? t)
+  const seekTo = useCallback((sec: number) => {
+    engineRef.current?.seek(sec)
+    setTime(engineRef.current?.currentTime ?? sec)
   }, [])
 
-  // 단축키
+  // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return
@@ -465,7 +454,7 @@ export default function App() {
       } else if (e.key === '-' || e.key === '_') {
         rollRef.current?.zoomTime(1 / 1.4)
       } else if ((e.code === 'ArrowLeft' || e.code === 'ArrowRight') && eng) {
-        // ← → 한 마디(4박) 이동
+        // ← → move by one bar (4 beats)
         e.preventDefault()
         const i = beatIndex(grid, eng.currentTime + 0.01)
         const target = grid.beats[Math.max(0, i + (e.code === 'ArrowRight' ? 4 : -4))] ?? 0
@@ -491,39 +480,56 @@ export default function App() {
   const patchTrack = (id: string, patch: Partial<TrackState>) =>
     setStates((ss) => ss.map((s) => (s.id === id ? { ...s, ...patch } : s)))
 
+  // Track labels follow the current language
+  const labeledStates = useMemo(() => states.map((s) => ({ ...s, label: trackLabel(s.id) })), [states, trackLabel])
   const chordState = states.find((s) => s.id === 'chords')
-  const editable = result?.tracks.filter((t) => t.notes) ?? []
+  const editable = result?.tracks.filter((tr) => tr.notes) ?? []
+  const saveLabel: Record<SaveState, MsgKey> = {
+    saved: 'ed.saved',
+    saving: 'ed.saving',
+    pending: 'ed.pending',
+    error: 'ed.saveError',
+  }
+  const jobMessage = (j: Job) => {
+    if (j.status === 'error') return t('msg.error', { error: j.error ?? '' })
+    if (j.status === 'done') return ''
+    const detail = j.status === 'transcribing' && j.detail ? trackLabel(j.detail) : j.detail ?? ''
+    return t(`msg.${j.status}` as MsgKey, { detail })
+  }
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="logo">♪ yt-amt</div>
         <form className="url-form" onSubmit={submit}>
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="YouTube 음악 링크를 붙여넣으세요"
-            required
-          />
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('app.placeholder')} required />
           <div className="seg">
             <button type="button" className={separator === 'roformer' ? 'on' : ''} onClick={() => setSeparator('roformer')}>
-              RoFormer <small>보컬/반주</small>
+              RoFormer <small>{t('app.sep.roformer')}</small>
             </button>
             <button type="button" className={separator === 'demucs' ? 'on' : ''} onClick={() => setSeparator('demucs')}>
-              Demucs <small>4분리</small>
+              Demucs <small>{t('app.sep.demucs')}</small>
             </button>
           </div>
           <button className="primary" disabled={running}>
-            채보 시작
+            {t('app.start')}
           </button>
         </form>
         <button className="history-btn" onClick={() => setHistoryOpen(true)}>
-          📁 작업 기록 <span>{jobs.length}</span>
+          📁 {t('app.history')} <span>{jobs.length}</span>
         </button>
+        <div className="seg lang" role="group" aria-label="Language">
+          <button className={lang === 'ko' ? 'on' : ''} onClick={() => setLang('ko')}>
+            한국어
+          </button>
+          <button className={lang === 'en' ? 'on' : ''} onClick={() => setLang('en')}>
+            EN
+          </button>
+        </div>
       </header>
 
       {error && (
-        <div className="banner error" onClick={() => setError(null)} title="클릭해서 닫기">
+        <div className="banner error" onClick={() => setError(null)} title={t('app.dismiss')}>
           {error}
         </div>
       )}
@@ -536,19 +542,19 @@ export default function App() {
                 key={s}
                 className={`stage ${STAGES.indexOf(s) < STAGES.indexOf(job.status) ? 'past' : ''} ${s === job.status ? 'cur' : ''}`}
               >
-                {STAGE_LABEL[s]}
+                {t(`stage.${s}` as MsgKey)}
               </span>
             ))}
           </div>
           <div className="progress">
             <div style={{ width: `${Math.round(job.progress * 100)}%` }} />
           </div>
-          <div className="msg">{job.status === 'error' ? `오류: ${job.error}` : job.message}</div>
+          <div className="msg">{jobMessage(job)}</div>
         </div>
       )}
 
       <div className="transport">
-        <button className="play" onClick={togglePlay} disabled={!engine || loadingAudio}>
+        <button className="play" onClick={togglePlay} disabled={!engine || loadingAudio} aria-label="Play/Pause">
           {playing ? '❚❚' : '▶'}
         </button>
         <span className="time">
@@ -558,13 +564,14 @@ export default function App() {
         <button
           className={`chip btn ${loopOn ? 'active' : ''}`}
           disabled={!loop}
-          title="반복 (L) · 룰러 드래그 또는 코드 클릭으로 구간 지정 · Esc 해제"
+          title={t('tp.loop.title')}
           onClick={() => setLoopOn((v) => !v)}
         >
-          ⟲ 반복{loop ? ` ${fmtTime(loop.start)}–${fmtTime(loop.end)}` : ''}
+          {t('tp.loop')}
+          {loop ? ` ${fmtTime(loop.start)}–${fmtTime(loop.end)}` : ''}
         </button>
-        <label className="chip" title="음정 유지 재생 속도">
-          속도{' '}
+        <label className="chip" title={t('tp.speed.title')}>
+          {t('tp.speed')}{' '}
           <select
             value={speed}
             disabled={!engine || loadingAudio || speedLoading}
@@ -578,11 +585,14 @@ export default function App() {
           </select>
           {speedLoading && ' …'}
         </label>
-        <label className="chip" title="스케일 밖 음을 어둡게 표시 · 코드 철자/로마숫자 기준">
-          키{' '}
+        <label className="chip" title={t('tp.key.title')}>
+          {t('tp.key')}{' '}
           <select value={keyChoice} onChange={(e) => setKeyChoice(e.target.value)} disabled={!result}>
-            <option value="auto">자동{detectedKey ? `: ${keyName(detectedKey)}` : ''}</option>
-            <option value="off">끄기</option>
+            <option value="auto">
+              {t('tp.key.auto')}
+              {detectedKey ? `: ${keyName(detectedKey)}` : ''}
+            </option>
+            <option value="off">{t('tp.key.off')}</option>
             {ALL_KEYS.map((k) => (
               <option key={keyId(k)} value={keyId(k)}>
                 {keyName(k)}
@@ -591,23 +601,23 @@ export default function App() {
           </select>
         </label>
         <label className="chip check">
-          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> 따라가기
+          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> {t('tp.follow')}
         </label>
         <label className="chip check">
-          <input type="checkbox" checked={showWave} onChange={(e) => setShowWave(e.target.checked)} /> 파형
+          <input type="checkbox" checked={showWave} onChange={(e) => setShowWave(e.target.checked)} /> {t('tp.wave')}
         </label>
-        <button className="chip btn" disabled={!result} onClick={() => rollRef.current?.fitPitch()} title="화면 맞춤 (F)">
-          ⤢ 맞춤
+        <button className="chip btn" disabled={!result} onClick={() => rollRef.current?.fitPitch()} title={t('tp.fit.title')}>
+          {t('tp.fit')}
         </button>
         <button
           className={`chip btn ${editMode ? 'active' : ''}`}
           disabled={!result}
           onClick={() => setEditMode((v) => !v)}
-          title="노트 편집 모드 (E)"
+          title={t('tp.edit.title')}
         >
-          ✎ 편집
+          {t('tp.edit')}
         </button>
-        <label className="chip master" title="마스터 볼륨">
+        <label className="chip master" title={t('tp.master')}>
           🔊
           <input
             type="range"
@@ -619,7 +629,7 @@ export default function App() {
           />
           <span>{Math.round(master * 100)}%</span>
         </label>
-        {loadingAudio && <span className="chip">오디오 로딩 중…</span>}
+        {loadingAudio && <span className="chip">{t('tp.loadingAudio')}</span>}
         <div className="spacer" />
         {result && (
           <>
@@ -627,13 +637,13 @@ export default function App() {
               {result.meta.title}
             </span>
             <details className="export">
-              <summary className="chip btn">내보내기 ▾</summary>
+              <summary className="chip btn">{t('tp.export')}</summary>
               <div className="menu">
                 <a href={api.fileUrl(result.job_id, 'midi/all.mid')} download="all.mid">
-                  전체 MIDI (모든 트랙 + 코드)
+                  {t('ex.allMidi')}
                 </a>
                 <a href={api.fileUrl(result.job_id, 'midi/chords.mid')} download="chords.mid">
-                  코드 MIDI
+                  {t('ex.chordMidi')}
                 </a>
                 <button
                   onClick={() =>
@@ -643,11 +653,11 @@ export default function App() {
                     )
                   }
                 >
-                  코드 리드시트 (.txt)
+                  {t('ex.leadSheet')}
                 </button>
-                {editable.map((t) => (
-                  <a key={t.id} href={api.musicxmlUrl(result.job_id, t.id)} download={`${t.id}.musicxml`}>
-                    MusicXML · {TRACK_META[t.id]?.label ?? t.id} + 코드
+                {editable.map((tr) => (
+                  <a key={tr.id} href={api.musicxmlUrl(result.job_id, tr.id)} download={`${tr.id}.musicxml`}>
+                    {t('ex.musicxml', { track: trackLabel(tr.id) })}
                   </a>
                 ))}
               </div>
@@ -659,45 +669,43 @@ export default function App() {
       {editMode && result && (
         <div className="editbar">
           <span className="chip">
-            편집 대상
+            {t('ed.target')}
             <select value={editTrack ?? ''} onChange={(e) => setEditTrack(e.target.value)}>
-              {editable.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {TRACK_META[t.id]?.label ?? t.id}
+              {editable.map((tr) => (
+                <option key={tr.id} value={tr.id}>
+                  {trackLabel(tr.id)}
                 </option>
               ))}
             </select>
           </span>
           <span className="chip">
-            격자
+            {t('ed.grid')}
             <select value={snapDiv} onChange={(e) => setSnapDiv(Number(e.target.value))}>
-              {SNAPS.map((s) => (
-                <option key={s.div} value={s.div}>
-                  {s.label}
+              {SNAPS.map((div) => (
+                <option key={div} value={div}>
+                  {t(`ed.snap.${div}` as MsgKey)}
                 </option>
               ))}
             </select>
           </span>
-          <button className="chip btn" disabled={!snapDiv} onClick={quantize} title="편집 대상 트랙 전체를 격자에 맞춤 (Q)">
-            퀀타이즈
+          <button className="chip btn" disabled={!snapDiv} onClick={quantize} title={t('ed.quantize.title')}>
+            {t('ed.quantize')}
           </button>
           <button className="chip btn" disabled={!undoStack.current.length} onClick={() => undoRedo('undo')} title="Ctrl+Z">
-            ↶ 실행 취소
+            {t('ed.undo')}
           </button>
           <button className="chip btn" disabled={!redoStack.current.length} onClick={() => undoRedo('redo')} title="Ctrl+Shift+Z">
-            ↷ 다시 실행
+            {t('ed.redo')}
           </button>
-          <span className={`chip save ${saveState}`}>
-            {saveState === 'saved' ? '✓ 저장됨' : saveState === 'saving' ? '저장 중…' : saveState === 'pending' ? '● 변경됨' : '저장 실패'}
-          </span>
-          <span className="hint">드래그: 이동 · 끝 드래그: 길이 · 더블클릭: 추가 · 우클릭/Delete: 삭제 · Shift: 스냅 해제</span>
+          <span className={`chip save ${saveState}`}>{t(saveLabel[saveState])}</span>
+          <span className="hint">{t('ed.hint')}</span>
         </div>
       )}
 
       {selected && (
         <div className="selbar">
           {pitchName(selected.note.pitch)} · {selected.note.start.toFixed(2)}s ~ {selected.note.end.toFixed(2)}s · vel{' '}
-          {selected.note.velocity} · {TRACK_META[selected.track]?.label}
+          {selected.note.velocity} · {trackLabel(selected.track)}
         </div>
       )}
 
@@ -705,7 +713,7 @@ export default function App() {
         {result ? (
           <>
             <TrackPanel
-              states={states}
+              states={labeledStates}
               tracks={result.tracks}
               onChange={patchTrack}
               midiUrl={(p) => api.fileUrl(result.job_id, p)}
@@ -713,7 +721,7 @@ export default function App() {
               editTrack={editTrack}
               onEditTrack={setEditTrack}
               busy={busy}
-              onRetranscribe={(t, p) => void retranscribe(t, p)}
+              onRetranscribe={(tr, p) => void retranscribe(tr, p)}
               chords={result.chords ?? null}
               onReanalyzeChords={(p) => void reanalyzeChords(p)}
             />
@@ -722,7 +730,7 @@ export default function App() {
               viewKey={result.job_id}
               engine={engine}
               tracks={result.tracks}
-              states={states.filter((s) => s.id !== 'chords')}
+              states={labeledStates.filter((s) => s.id !== 'chords')}
               grid={grid}
               duration={duration}
               follow={follow}
@@ -746,22 +754,18 @@ export default function App() {
           </>
         ) : (
           <div className="empty">
-            <p>
-              YouTube 링크를 넣고 분리 엔진을 고른 뒤 <b>채보 시작</b>을 누르세요.
-            </p>
-            <p className="sub">RoFormer: 보컬/반주 2트랙 · Demucs: 보컬/베이스/기타/드럼 4트랙 · 코드 진행은 자동 분석</p>
+            <p dangerouslySetInnerHTML={{ __html: t('app.empty.1') }} />
+            <p className="sub">{t('app.empty.2')}</p>
             {jobs.some((j) => j.status === 'done') && (
               <button className="tbtn on" onClick={() => setHistoryOpen(true)}>
-                이전 작업 열기
+                {t('app.empty.open')}
               </button>
             )}
           </div>
         )}
       </main>
 
-      <footer className="statusbar">
-        Space 재생 · ←/→ 마디 이동 · L 반복 · E 편집 · F 맞춤 · +/− 줌 · Ctrl+휠 줌 · Alt+휠 건반 높이 · 미니맵 클릭/드래그 이동
-      </footer>
+      <footer className="statusbar">{t('app.shortcuts')}</footer>
 
       {historyOpen && (
         <HistoryPanel

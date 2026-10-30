@@ -1,0 +1,33 @@
+name: Bug report / 버그 제보
+description: Something does not work as expected / 예상대로 동작하지 않을 때
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / 무슨 일이 있었나요?
+      description: Steps to reproduce and what you expected. / 재현 순서와 기대한 동작
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: YouTube link (public) / YouTube 링크(공개 영상)
+      description: Please do not attach audio files. / 오디오 파일은 첨부하지 마세요.
+  - type: dropdown
+    id: separator
+    attributes:
+      label: Separator / 분리 엔진
+      options: [RoFormer, Demucs, n/a]
+  - type: input
+    id: env
+    attributes:
+      label: Environment / 환경
+      placeholder: "Windows 11, RTX 3050 4GB, Python 3.11, Node 24"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Backend log / 백엔드 로그
+      render: text

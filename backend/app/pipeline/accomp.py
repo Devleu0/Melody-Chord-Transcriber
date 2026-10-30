@@ -1,10 +1,10 @@
-"""반주 계열 stem -> Basic Pitch(ONNX) 다성 채보."""
+"""Accompaniment-type stems -> polyphonic transcription with Basic Pitch (ONNX)."""
 from pathlib import Path
 
-# UI 에서 조정 가능한 파라미터와 기본값
+# Parameters adjustable from the UI, with defaults
 DEFAULT_PARAMS = {"onset_threshold": 0.5, "frame_threshold": 0.3, "minimum_note_length": 80.0}
 
-# 트랙별 Basic Pitch 주파수 범위 (Hz 범위 제한으로 잡음 노트 감소)
+# Per-track Basic Pitch frequency range (limiting the Hz range reduces spurious notes)
 TRACK_RANGES = {
     "bass": {"minimum_frequency": 30.0, "maximum_frequency": 400.0},
     "other": {"minimum_frequency": 60.0},

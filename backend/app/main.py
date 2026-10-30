@@ -46,14 +46,14 @@ def _public(job) -> dict:
 def _done_dir(job_id: str):
     job = manager.jobs.get(job_id)
     if not job or job.status != "done":
-        raise HTTPException(404, "완료된 작업이 아닙니다")
+        raise HTTPException(404, "Job is not finished")
     return job.dir
 
 
 @app.post("/api/jobs")
 def create_job(req: JobRequest):
     if not req.url.startswith(("http://", "https://")):
-        raise HTTPException(400, "URL 형식이 올바르지 않습니다")
+        raise HTTPException(400, "Invalid URL format")
     return _public(manager.submit(req.url, req.separator))
 
 
@@ -93,7 +93,7 @@ def get_result(job_id: str):
 
 @app.put("/api/jobs/{job_id}/tracks/{track}/notes")
 def put_notes(job_id: str, track: str, req: NotesRequest):
-    """편집한 노트 저장 + MIDI 재생성."""
+    """Save edited notes + regenerate MIDI."""
     try:
         jobs.update_notes(_done_dir(job_id), track, [n.model_dump() for n in req.notes if n.end > n.start])
     except KeyError:
@@ -103,7 +103,7 @@ def put_notes(job_id: str, track: str, req: NotesRequest):
 
 @app.post("/api/jobs/{job_id}/tracks/{track}/retranscribe")
 def post_retranscribe(job_id: str, track: str, req: RetranscribeRequest):
-    """파라미터를 바꿔 해당 트랙만 다시 채보 (보컬은 f0 캐시 사용)."""
+    """Re-transcribe only this track with new parameters (vocals reuse the f0 cache)."""
     try:
         return jobs.retranscribe(_done_dir(job_id), track, req.params)
     except KeyError:
@@ -112,13 +112,13 @@ def post_retranscribe(job_id: str, track: str, req: RetranscribeRequest):
 
 @app.post("/api/jobs/{job_id}/chords")
 def post_chords(job_id: str, req: ChordRequest):
-    """코드 진행만 다시 분석 (기존 작업에도 사용)."""
+    """Re-analyze only the chord progression (also works on existing jobs)."""
     return jobs.reanalyze_chords(_done_dir(job_id), req.change_penalty)
 
 
 @app.get("/api/jobs/{job_id}/musicxml")
 def get_musicxml(job_id: str, track: str = "vocals"):
-    """단선율 + 코드 심볼 리드시트 MusicXML."""
+    """Lead-sheet MusicXML: monophonic melody + chord symbols."""
     from .pipeline.export import write_musicxml
 
     job_dir = _done_dir(job_id)
@@ -139,7 +139,7 @@ SPEEDS = {0.5, 0.6, 0.75, 0.9}
 
 @app.get("/api/jobs/{job_id}/audio")
 def get_stretched_audio(job_id: str, path: str, speed: float):
-    """음정 유지 속도 변환(ffmpeg atempo) 오디오. 결과는 job 폴더에 캐시."""
+    """Pitch-preserving tempo-changed audio (ffmpeg atempo). Cached in the job folder."""
     if speed not in SPEEDS:
         raise HTTPException(400, f"speed must be one of {sorted(SPEEDS)}")
     job_dir = (DATA_DIR / job_id).resolve()
@@ -156,10 +156,10 @@ def get_stretched_audio(job_id: str, path: str, speed: float):
             text=True,
         )
         if proc.returncode != 0:
-            raise HTTPException(500, f"ffmpeg 실패: {proc.stderr[-300:]}")
+            raise HTTPException(500, f"ffmpeg failed: {proc.stderr[-300:]}")
         tmp.replace(out)
     return FileResponse(out, media_type="audio/wav")
 
 
-# 스템 wav / MIDI 파일 (data/jobs/{id}/...)
+# Stem wav / MIDI files (data/jobs/{id}/...)
 app.mount("/files", StaticFiles(directory=DATA_DIR), name="files")

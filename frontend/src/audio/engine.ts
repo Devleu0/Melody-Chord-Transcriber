@@ -1,6 +1,6 @@
 import type { Note } from '../types'
 
-const LOOKAHEAD = 0.15 // 스케줄 선행 시간(s, 오디오 클럭 기준)
+const LOOKAHEAD = 0.15 // scheduling lookahead (s, audio clock)
 const START_DELAY = 0.05
 
 export interface LoopRange {
@@ -14,23 +14,23 @@ interface AudioTrack {
 }
 
 interface SynthTrack {
-  notes: Note[] // start 오름차순
+  notes: Note[] // sorted by start
   gain: GainNode
 }
 
-/** 재생 구간: 오디오 클럭 ctx0 에 곡 시각 song0 부터 songEnd 까지 재생 */
+/** Playback segment: plays song time song0..songEnd starting at audio clock ctx0 */
 interface Segment {
   ctx0: number
   song0: number
   songEnd: number
-  loops: boolean // songEnd 에서 루프 시작점으로 되돌아가는지
+  loops: boolean // whether it jumps back to the loop start at songEnd
   sources: AudioBufferSourceNode[]
-  schedUntil: number // 신스 노트를 예약한 곡 시각
+  schedUntil: number // song time up to which synth notes are scheduled
 }
 
 const midiToHz = (m: number) => 440 * 2 ** ((m - 69) / 12)
 
-/** start >= t 인 첫 노트 인덱스 */
+/** Index of the first note with start >= t */
 function lowerBound(notes: Note[], t: number) {
   let lo = 0
   let hi = notes.length
@@ -43,9 +43,9 @@ function lowerBound(notes: Note[], t: number) {
 }
 
 /**
- * 여러 stem 을 샘플 단위로 동기 재생하고, 채보된 노트를 간단한 신스로 함께 재생한다.
- * - 구간 반복: 다음 구간을 오디오 클럭 기준으로 미리 예약해 끊김 없이 되감는다.
- * - 속도: 서버에서 음정 유지 변환된 버퍼를 받아 곡 시각 = 버퍼 시각 × rate 로 매핑한다.
+ * Plays multiple stems sample-synchronously, along with transcribed notes on a simple synth.
+ * - Looping: the next segment is pre-scheduled on the audio clock so it rewinds gaplessly.
+ * - Speed: uses pitch-preserving buffers from the server, mapping song time = buffer time × rate.
  */
 export class AudioEngine {
   readonly ctx = new AudioContext()
@@ -53,7 +53,7 @@ export class AudioEngine {
   private audio = new Map<string, AudioTrack>()
   private synth = new Map<string, SynthTrack>()
   private segs: Segment[] = []
-  private offset = 0 // 정지 상태의 곡 시각
+  private offset = 0 // song time while stopped
   private timer: number | undefined
   private rate = 1
   private loopRange: LoopRange | null = null
@@ -66,7 +66,7 @@ export class AudioEngine {
 
   private async fetchBuffer(url: string) {
     const data = await fetch(url).then((r) => {
-      if (!r.ok) throw new Error(`오디오 로드 실패: ${url}`)
+      if (!r.ok) throw new Error(`Failed to load audio: ${url}`)
       return r.arrayBuffer()
     })
     return this.ctx.decodeAudioData(data)
@@ -80,7 +80,7 @@ export class AudioEngine {
     this.duration = Math.max(this.duration, buffer.duration)
   }
 
-  /** 재생 속도 변경. urls 는 해당 속도로 변환된 각 트랙의 오디오 */
+  /** Change playback speed. urls are each track's audio converted to that speed */
   async setRate(rate: number, urls: Map<string, string>) {
     if (rate === this.rate) return
     const wasPlaying = this.isPlaying
@@ -100,7 +100,7 @@ export class AudioEngine {
     return this.rate
   }
 
-  /** 신스 트랙 노트 설정. 편집 후 재호출해도 게인(볼륨/뮤트)은 유지된다. */
+  /** Set synth track notes. Gain (volume/mute) is kept when called again after edits. */
   setNotes(id: string, notes: Note[]) {
     let gain = this.synth.get(id)?.gain
     if (!gain) {
@@ -108,11 +108,11 @@ export class AudioEngine {
       gain.gain.value = 0
       gain.connect(this.master)
     }
-    // 재생 중이어도 아직 예약 전인 구간(schedUntil 이후)부터 새 노트가 반영된다
+    // even during playback, new notes apply from the not-yet-scheduled range (after schedUntil)
     this.synth.set(id, { notes: [...notes].sort((a, b) => a.start - b.start), gain })
   }
 
-  /** 파형 표시용 |샘플| 최대값 (초당 rate 개). 로드 직후의 원본 버퍼 기준 */
+  /** Max |sample| for the waveform display (rate per second), from the original buffer as loaded */
   peaks(id: string, rate = 200): Float32Array | null {
     const t = this.audio.get(id)
     if (!t) return null
@@ -146,7 +146,7 @@ export class AudioEngine {
     this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.01)
   }
 
-  /** 반복 구간 설정/해제. 재생 중이면 현재 위치에서 다시 예약한다. */
+  /** Set/clear the loop range. Reschedules from the current position if playing. */
   setLoop(range: LoopRange | null) {
     this.loopRange = range && range.end - range.start >= 0.1 ? range : null
     if (this.isPlaying) this.seek(this.currentTime)
@@ -163,7 +163,7 @@ export class AudioEngine {
   get currentTime() {
     if (!this.isPlaying) return this.offset
     const now = this.ctx.currentTime
-    // 이미 시작된 가장 늦은 구간 기준
+    // based on the latest segment that has already started
     let seg = this.segs[0]
     for (const s of this.segs) if (s.ctx0 <= now) seg = s
     const t = seg.song0 + Math.max(0, now - seg.ctx0) * this.rate
@@ -193,7 +193,7 @@ export class AudioEngine {
 
   private startSegment(ctx0: number, song0: number) {
     const loop = this.loopRange
-    // 루프 끝 이전에서 시작하면 루프 끝에서 되감고, 그 뒤면 곡 끝까지 재생
+    // starting before the loop end rewinds there; starting after it plays to the end of the song
     const loops = !!loop && song0 < loop.end - 0.01
     const seg: Segment = {
       ctx0,
@@ -210,7 +210,7 @@ export class AudioEngine {
       src.start(ctx0, song0 / this.rate)
       seg.sources.push(src)
     }
-    // 구간 시작 시점에 이미 울리고 있어야 하는 노트
+    // notes that should already be sounding at the segment start
     for (const s of this.synth.values()) {
       for (const n of s.notes) {
         if (n.start >= song0) break
@@ -227,7 +227,7 @@ export class AudioEngine {
         try {
           src.stop()
         } catch {
-          /* 아직 시작 전인 소스 */
+          /* source not started yet */
         }
         src.disconnect()
       }
@@ -238,7 +238,7 @@ export class AudioEngine {
 
   private tick() {
     const now = this.ctx.currentTime
-    // 끝난 구간 정리
+    // clean up finished segments
     while (this.segs.length > 1 && this.segs[1].ctx0 <= now) {
       this.segs.shift()
     }
@@ -251,7 +251,7 @@ export class AudioEngine {
       this.onEnded?.()
       return
     }
-    // 루프 끝이 다가오면 다음 구간을 정확한 시각에 예약
+    // as the loop end approaches, schedule the next segment at the exact time
     if (cur.loops && this.segs.length === 1 && endCtx - now < LOOKAHEAD && this.loopRange) {
       for (const src of cur.sources) src.stop(endCtx)
       this.startSegment(endCtx, this.loopRange.start)
@@ -272,7 +272,7 @@ export class AudioEngine {
     }
   }
 
-  /** 신스 한 음 (트라이앵글 + 짧은 엔벨로프) */
+  /** One synth note (triangle + short envelope) */
   private voice(pitch: number, at: number, dur: number, velocity: number, out: AudioNode) {
     const osc = this.ctx.createOscillator()
     const env = this.ctx.createGain()
@@ -289,7 +289,7 @@ export class AudioEngine {
     osc.stop(end + 0.2)
   }
 
-  /** 건반/노트 클릭 미리듣기 */
+  /** Preview on key/note click */
   preview(pitch: number, dur = 0.4) {
     void this.ctx.resume()
     this.voice(pitch, this.ctx.currentTime, dur, 100, this.master)

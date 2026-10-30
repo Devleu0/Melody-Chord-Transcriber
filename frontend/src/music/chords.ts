@@ -5,8 +5,8 @@ import { keyName, type Key } from './key'
 
 const SHARP = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B']
 const FLAT = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B']
-// 플랫 계열 조 (장조 으뜸음 기준)
-const FLAT_MAJOR = new Set([5, 10, 3, 8, 1, 6])
+// Flat-side keys by major tonic (F, B♭, E♭, A♭, D♭); spelled like KEY_NAMES in key.ts
+const FLAT_MAJOR = new Set([5, 10, 3, 8, 1])
 
 const SUFFIX: Record<Quality, string> = {
   maj: '',
@@ -42,7 +42,7 @@ const ROMAN_SUFFIX: Partial<Record<Quality, string>> = {
   sus4: 'sus4',
 }
 
-/** 조에 맞는 철자(♯/♭)로 음이름 */
+/** Note name spelled (♯/♭) to fit the key */
 export function pcName(pc: number, key: Key | null): string {
   if (!key) return FLAT[pc]
   const majorTonic = key.mode === 'major' ? key.tonic : (key.tonic + 3) % 12
@@ -63,7 +63,7 @@ export function romanNumeral(c: Chord, key: Key | null): string {
 
 export type ChordFunction = 'tonic' | 'subdominant' | 'dominant' | 'chromatic'
 
-/** 기능 화성 분류 (근음 도수 기준의 단순화) */
+/** Harmonic function (simplified, by root scale degree) */
 export function chordFunction(c: Chord, key: Key | null): ChordFunction {
   if (!key) return 'chromatic'
   const deg = (c.root - key.tonic + 12) % 12
@@ -84,7 +84,7 @@ export const FUNCTION_COLOR: Record<ChordFunction, string> = {
   chromatic: '#b197fc',
 }
 
-/** 신스 재생용 보이싱 (백엔드 MIDI 와 동일: 근음 C3 대역, 전위 베이스는 C2 대역) */
+/** Voicing for synth playback (same as backend MIDI: root around C3, inversion bass around C2) */
 export function chordToNotes(chords: Chord[]): Note[] {
   const notes: Note[] = []
   for (const c of chords) {
@@ -95,7 +95,7 @@ export function chordToNotes(chords: Chord[]): Note[] {
   return notes.sort((a, b) => a.start - b.start)
 }
 
-/** 마디(4/4)별 코드 텍스트 리드시트 */
+/** Text lead sheet of chords per bar (4/4) */
 export function leadSheet(
   chords: Chord[],
   grid: BeatGrid,
@@ -104,7 +104,7 @@ export function leadSheet(
 ): string {
   const lines = [
     meta.title ?? 'Untitled',
-    `Key: ${key ? keyName(key) : '?'}   Tempo: ${meta.tempo.toFixed(0)} BPM   (4/4, 마디 = 감지된 비트 4개)`,
+    `Key: ${key ? keyName(key) : '?'}   Tempo: ${meta.tempo.toFixed(0)} BPM   (4/4, 1 bar = 4 detected beats)`,
     '',
   ]
   const bars: string[] = []
@@ -119,7 +119,7 @@ export function leadSheet(
     }
     bars.push(names.join(' '))
   }
-  // 마지막의 무코드 마디 제거
+  // drop trailing chordless bars
   while (bars.length && bars[bars.length - 1] === 'N.C.') bars.pop()
   for (let i = 0; i < bars.length; i += 4) {
     const row = bars.slice(i, i + 4).map((s) => s.padEnd(14))
@@ -128,7 +128,7 @@ export function leadSheet(
   return lines.join('\n') + '\n'
 }
 
-/** 화면 표시용: 시각 t 의 마디 번호 (1부터, 픽업은 0 이하) */
+/** For display: bar number at time t (1-based, pickup is <= 0) */
 export function barNumber(grid: BeatGrid, t: number): number {
   return Math.floor((beatIndex(grid, t) - grid.firstIndex) / 4) + 1
 }

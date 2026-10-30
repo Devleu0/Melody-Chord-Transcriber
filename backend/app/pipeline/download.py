@@ -10,13 +10,13 @@ class DownloadError(Exception):
 
 
 def download_audio(url: str, out_dir: Path) -> dict:
-    """YouTube URL에서 오디오만 받아 out_dir/source.wav 로 저장한다."""
+    """Download only the audio from a YouTube URL and save it as out_dir/source.wav."""
     out_dir.mkdir(parents=True, exist_ok=True)
     common = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        # 최신 YouTube는 JS 챌린지 풀이가 필요. deno가 없으면 설치된 node 사용
+        # Recent YouTube requires solving a JS challenge. Fall back to installed node if deno is missing
         "js_runtimes": {"deno": {}, "node": {}},
     }
 
@@ -24,7 +24,7 @@ def download_audio(url: str, out_dir: Path) -> dict:
         info = ydl.extract_info(url, download=False)
     duration = info.get("duration") or 0
     if duration > MAX_DURATION_SEC:
-        raise DownloadError(f"영상이 너무 깁니다 ({duration // 60}분). 최대 {MAX_DURATION_SEC // 60}분")
+        raise DownloadError(f"Video is too long ({duration // 60} min). Max {MAX_DURATION_SEC // 60} min")
 
     opts = {
         **common,
@@ -33,7 +33,7 @@ def download_audio(url: str, out_dir: Path) -> dict:
         "postprocessors": [
             {"key": "FFmpegExtractAudio", "preferredcodec": "wav"},
         ],
-        # 44.1kHz 스테레오로 통일
+        # Normalize to 44.1kHz stereo
         "postprocessor_args": {"extractaudio": ["-ar", "44100", "-ac", "2"]},
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -41,7 +41,7 @@ def download_audio(url: str, out_dir: Path) -> dict:
 
     wav = out_dir / "source.wav"
     if not wav.exists():
-        raise DownloadError("오디오 추출 실패 (ffmpeg 확인 필요)")
+        raise DownloadError("Audio extraction failed (check ffmpeg)")
     return {
         "title": info.get("title"),
         "uploader": info.get("uploader"),

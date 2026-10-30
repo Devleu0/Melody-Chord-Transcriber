@@ -4,6 +4,7 @@ import { FUNCTION_COLOR, chordFunction, chordName, pcName, romanNumeral } from '
 import { snapTime, stepAt, type BeatGrid } from '../music/grid'
 import { scaleSet, type Key } from '../music/key'
 import { fmtTime, pitchName } from '../music/format'
+import { useI18n } from '../i18n'
 import type { Chord, Note, TrackData, TrackState } from '../types'
 
 const KEY_W = 72
@@ -37,7 +38,7 @@ const C = {
 }
 
 interface View {
-  x0: number // 화면 왼쪽 시각(s)
+  x0: number // time at the left edge of the view (s)
   pps: number // px per sec
   scrollY: number // px
   keyH: number // px per semitone
@@ -57,7 +58,7 @@ export interface PianoRollHandle {
 }
 
 interface Props {
-  viewKey: string // 이 값이 바뀔 때만 뷰(스크롤/줌) 초기화
+  viewKey: string // view (scroll/zoom) resets only when this changes
   engine: AudioEngine | null
   tracks: TrackData[]
   states: TrackState[]
@@ -67,7 +68,7 @@ interface Props {
   selected: Note | null
   onSelect: (n: Note | null, trackId: string | null) => void
   scaleKey: Key | null
-  nameKey: Key | null // 코드 철자/로마숫자 기준 조
+  nameKey: Key | null // key used for chord spelling / roman numerals
   loop: LoopRange | null
   loopOn: boolean
   onLoopChange: (r: LoopRange | null) => void
@@ -78,8 +79,8 @@ interface Props {
   showWave: boolean
   editMode: boolean
   editTrack: string | null
-  snapDiv: number // 박 분할 (0 = 스냅 끔)
-  /** before=null: 추가, after=null: 삭제, 둘 다: 수정 */
+  snapDiv: number // beat subdivision (0 = snap off)
+  /** before=null: add, after=null: delete, both: modify */
   onEditNote: (track: string, before: Note | null, after: Note | null) => void
 }
 
@@ -89,16 +90,20 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
   const propsRef = useRef(props)
   const view = useRef<View>({ x0: 0, pps: 120, scrollY: 0, keyH: 14 })
   const dirty = useRef(true)
-  // 룰러 드래그 중인 반복 구간 (놓을 때 onLoopChange 로 확정)
+  // loop range being dragged on the ruler (committed via onLoopChange on release)
   const loopDraft = useRef<LoopRange | null>(null)
-  // 편집 드래그 중인 노트 (놓을 때 onEditNote 로 확정)
+  // note being dragged in edit mode (committed via onEditNote on release)
   const editDraft = useRef<{ track: string; orig: Note; cur: Note; grab: number } | null>(null)
   const hover = useRef<Hover>(null)
+  const lastNow = useRef(0) // playhead at the previous frame, to detect seeks
   const drag = useRef<{ mode: DragMode; x: number; y: number; x0: number; sy: number } | null>(null)
+  const { t } = useI18n()
+  const tRef = useRef(t)
+  tRef.current = t
   propsRef.current = props
   dirty.current = true
 
-  // --- 레이아웃 ---
+  // --- Layout ---
   function lay() {
     const { showChords, chords, showWave, peaks } = propsRef.current
     const rulerTop = MINI_H
@@ -110,7 +115,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     return { rulerTop, chordTop, hasChords, waveTop, hasWave, gridTop }
   }
 
-  // 좌표 변환
+  // Coordinate conversion
   const tx = (t: number) => KEY_W + (t - view.current.x0) * view.current.pps
   const xToT = (x: number) => view.current.x0 + (x - KEY_W) / view.current.pps
   const py = (p: number) => lay().gridTop + (MAX_PITCH - p) * view.current.keyH - view.current.scrollY
@@ -147,13 +152,13 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
           hi = Math.max(hi, n.pitch)
         }
       }
-      if (lo <= hi) break // 화면 안에 노트가 없으면 곡 전체 기준
+      if (lo <= hi) break // no notes in view: use the whole song
     }
     if (lo > hi) return
     const gridH = el.clientHeight - lay().gridTop
-    v.keyH = gridH / (hi - lo + 5)
+    v.keyH = Math.min(24, gridH / (hi - lo + 5))
     clampView()
-    v.scrollY = (MAX_PITCH - hi - 2) * v.keyH
+    v.scrollY = (MAX_PITCH - (hi + lo) / 2) * v.keyH - gridH / 2 // center the range
     clampView()
     dirty.current = true
   }
@@ -165,7 +170,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       const v = view.current
       const now = propsRef.current.engine?.currentTime ?? 0
       const W = el.clientWidth
-      // 재생 헤드가 화면 안이면 그 위치 기준, 아니면 화면 중앙 기준
+      // anchor on the playhead if it is in view, otherwise on the view center
       const anchorX = tx(now) >= KEY_W && tx(now) <= W ? tx(now) : (KEY_W + W) / 2
       const t = xToT(anchorX)
       v.pps *= factor
@@ -177,7 +182,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     fitPitch,
   }))
 
-  // 새 작업이 로드되면 보컬 음역대 중심으로 스크롤
+  // when a new job loads, scroll to center on the vocal range
   useEffect(() => {
     const vocal = props.tracks.find((t) => t.id === 'vocals')?.notes ?? []
     const ps = vocal.map((n) => n.pitch).sort((a, b) => a - b)
@@ -197,7 +202,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     const t = xToT(x)
     const p = yToP(y)
     const { tracks, states, editMode, editTrack } = propsRef.current
-    // 편집 모드에서는 편집 대상 트랙만, 아니면 위에 그려진(나중 순서) 트랙부터
+    // in edit mode only the edited track; otherwise topmost (last drawn) track first
     const order = editMode && editTrack ? states.filter((s) => s.id === editTrack) : [...states].reverse()
     for (const st of order) {
       if (!st.showNotes) continue
@@ -238,9 +243,11 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     const hv = hover.current
     const draft = editDraft.current
 
-    // 재생 중 자동 스크롤
-    if (engine?.isPlaying && follow && !drag.current) {
-      const span = (W - KEY_W) / v.pps
+    // auto-scroll during playback, and after a seek (keyboard, chord click) lands off-screen
+    const span = (W - KEY_W) / v.pps
+    const jumped = Math.abs(now - lastNow.current) > 0.5
+    lastNow.current = now
+    if (follow && !drag.current && (engine?.isPlaying || jumped)) {
       if (now > v.x0 + span * 0.85 || now < v.x0) v.x0 = Math.max(0, now - span * 0.1)
     }
     const t0 = v.x0
@@ -248,7 +255,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     const kh = v.keyH
     const GT = L.gridTop
 
-    // --- 그리드 배경 ---
+    // --- Grid background ---
     g.fillStyle = C.bg
     g.fillRect(0, 0, W, H)
     const pTop = Math.min(MAX_PITCH, yToP(GT))
@@ -260,7 +267,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
         g.fillRect(KEY_W, y, W - KEY_W, kh)
       }
       if (scale) {
-        // 스케일 밖 음은 어둡게, 으뜸음은 은은하게 강조
+        // darken out-of-scale rows, subtly highlight the tonic
         if (!scale.has(p % 12)) {
           g.fillStyle = 'rgba(0,0,0,0.32)'
           g.fillRect(KEY_W, y, W - KEY_W, kh)
@@ -273,14 +280,14 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       g.fillRect(KEY_W, y + kh - 1, W - KEY_W, 1)
     }
 
-    // --- 비트/마디/분할 선 ---
+    // --- Beat/bar/subdivision lines ---
     const bars: { t: number; bar: number }[] = []
     grid.beats.forEach((b, i) => {
       if (b < t0 - 1 || b > t1 + 1) return
       const rel = i - grid.firstIndex
       const isBar = ((rel % 4) + 4) % 4 === 0
       if (isBar && rel >= 0) bars.push({ t: b, bar: rel / 4 + 1 })
-      // 편집 모드: 스냅 격자 표시
+      // edit mode: show the snap grid
       if (P.editMode && P.snapDiv > 1 && v.pps * grid.period / P.snapDiv > 8) {
         const next = grid.beats[i + 1] ?? b + grid.period
         g.fillStyle = C.sub
@@ -291,7 +298,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       g.fillRect(Math.round(tx(b)), GT, 1, H - GT)
     })
 
-    // --- 반복 구간 (그리드) ---
+    // --- Loop range (grid) ---
     const lx0 = loop ? Math.max(KEY_W, tx(loop.start)) : 0
     const lx1 = loop ? tx(loop.end) : 0
     if (loop && lx1 > KEY_W) {
@@ -302,13 +309,13 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       g.fillRect(lx1, GT, 1, H - GT)
     }
 
-    // --- 노트 & 피치 곡선 ---
+    // --- Notes & pitch curves ---
     const sounding = new Map<number, string>()
     for (const st of states) {
       if (!st.showNotes) continue
       const data = tracks.find((d) => d.id === st.id)
       if (!data?.notes) continue
-      const dim = P.editMode && P.editTrack && P.editTrack !== st.id // 편집 대상 외 트랙은 흐리게
+      const dim = P.editMode && P.editTrack && P.editTrack !== st.id // dim tracks other than the edited one
       const curve = data.pitch_curve
       if (curve && v.pps >= 30 && !dim) {
         g.strokeStyle = st.color + '66'
@@ -324,7 +331,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
             continue
           }
           const x = tx(i / curve.fps)
-          // 연속 피치값이므로 반음 사이도 그대로 표현 (행 중앙 = 정확한 음)
+          // continuous pitch, so values between semitones are drawn as-is (row center = exact pitch)
           const y = py(m) + kh / 2
           if (prev == null || Math.abs(prev - m) > 1.5) g.moveTo(x, y)
           else g.lineTo(x, y)
@@ -345,7 +352,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
         g.fillStyle = 'rgba(0,0,0,0.35)'
         g.fillRect(x, y + 1, 2, kh - 2)
         if (scale && !scale.has(n.pitch % 12)) {
-          // 스케일 밖 노트 표시 (채보 오류 후보)
+          // mark out-of-scale notes (possible transcription errors)
           g.fillStyle = '#ff4d4f'
           g.fillRect(x, y + kh - 3, w, 2)
         }
@@ -365,14 +372,14 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       }
     }
 
-    // --- 재생 헤드 (그리드) ---
+    // --- Playhead (grid) ---
     const phx = tx(now)
     if (phx >= KEY_W) {
       g.fillStyle = C.playhead
       g.fillRect(Math.round(phx), GT, 1.5, H - GT)
     }
 
-    // --- 파형 레인 ---
+    // --- Waveform lane ---
     if (L.hasWave && peaks) {
       const top = L.waveTop
       g.fillStyle = C.lane
@@ -403,7 +410,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       g.fillRect(KEY_W, top + WAVE_H - 1, W - KEY_W, 1)
     }
 
-    // --- 코드 레인 ---
+    // --- Chord lane ---
     if (L.hasChords) {
       const top = L.chordTop
       g.fillStyle = C.lane
@@ -457,7 +464,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       g.fillRect(KEY_W, top + CHORD_H - 1, W - KEY_W, 1)
     }
 
-    // --- 룰러 ---
+    // --- Ruler ---
     const RT = L.rulerTop
     g.fillStyle = C.ruler
     g.fillRect(KEY_W, RT, W - KEY_W, RULER_H)
@@ -480,7 +487,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
         lastX = x
       }
     }
-    // 초 단위 보조 눈금
+    // secondary ticks in seconds
     const step = v.pps > 80 ? 1 : v.pps > 20 ? 5 : v.pps > 8 ? 15 : 30
     g.font = '9px system-ui, sans-serif'
     for (let s = Math.ceil(t0 / step) * step; s <= t1; s += step) {
@@ -499,7 +506,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       g.fill()
     }
 
-    // --- 미니맵 (곡 전체) ---
+    // --- Minimap (whole song) ---
     g.fillStyle = '#121418'
     g.fillRect(0, 0, W, MINI_H)
     for (const st of states) {
@@ -528,7 +535,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     g.fillStyle = '#000'
     g.fillRect(0, MINI_H - 1, W, 1)
 
-    // --- 세로 건반 ---
+    // --- Vertical keyboard ---
     const chordTones = hv?.kind === 'chord' ? new Set(hv.chord.pcs) : null
     g.fillStyle = C.keyWhite
     g.fillRect(0, GT, KEY_W, H - GT)
@@ -536,7 +543,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       const y = py(p)
       const hl = sounding.get(p) ?? (chordTones?.has(p % 12) ? '#b197fc' : undefined)
       if (scale && !scale.has(p % 12) && !hl && !isBlack(p)) {
-        // 스케일 밖 흰건반은 회색 처리
+        // gray out out-of-scale white keys
         g.fillStyle = '#a9aeb8'
         g.fillRect(0, y, KEY_W, kh)
       }
@@ -548,7 +555,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
           g.fillStyle = hl
           g.fillRect(0, y, KEY_W, kh)
         }
-        // 흰건반 경계: B-C, E-F 사이 또는 검은건반 중앙
+        // white key borders: between B-C and E-F, or at black key centers
         g.fillStyle = '#9aa0ad'
         const pc = p % 12
         if (pc === 0 || pc === 5) g.fillRect(0, y + kh - 1, KEY_W, 1)
@@ -563,31 +570,33 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     g.fillStyle = '#000'
     g.fillRect(KEY_W - 1, GT, 1, H - GT)
 
-    // 왼쪽 열 레인 라벨
+    // lane labels in the left column
     g.fillStyle = C.ruler
     g.fillRect(0, MINI_H, KEY_W - 1, GT - MINI_H)
     g.fillStyle = '#5d6577'
     g.font = '10px system-ui, sans-serif'
-    g.fillText('마디', 8, RT + 15)
-    if (L.hasChords) g.fillText('코드', 8, L.chordTop + CHORD_H / 2 + 4)
-    if (L.hasWave) g.fillText('파형', 8, L.waveTop + WAVE_H / 2 + 4)
+    const tl = tRef.current
+    g.fillText(tl('roll.bars'), 8, RT + 15)
+    if (L.hasChords) g.fillText(tl('roll.chords'), 8, L.chordTop + CHORD_H / 2 + 4)
+    if (L.hasWave) g.fillText(tl('roll.wave'), 8, L.waveTop + WAVE_H / 2 + 4)
     g.fillStyle = C.octLine
     g.fillRect(0, GT - 1, KEY_W, 1)
 
-    // --- 호버 툴팁 ---
+    // --- Hover tooltip ---
     if (hv && !drag.current) {
+      const tr = tRef.current
       let lines: string[]
       if (hv.kind === 'chord') {
         const c = hv.chord
         const roman = romanNumeral(c, nameKey)
         lines = [
           `${chordName(c, nameKey)}${roman ? `  ·  ${roman}` : ''}`,
-          `구성음: ${c.pcs.map((pc) => pcName(pc, nameKey)).join(' ')}`,
-          `${fmtTime(c.start)} – ${fmtTime(c.end)}  ·  클릭: 구간 반복`,
+          `${tr('roll.tones')}: ${c.pcs.map((pc) => pcName(pc, nameKey)).join(' ')}`,
+          `${fmtTime(c.start)} – ${fmtTime(c.end)}  ·  ${tr('roll.clickLoop')}`,
         ]
       } else {
         const p = hv.kind === 'note' ? hv.note.pitch : hv.pitch
-        // 호버한 음의 행을 건반과 그리드에 은은하게 표시
+        // subtly highlight the hovered pitch row on the keyboard and grid
         g.fillStyle = 'rgba(255,255,255,0.05)'
         g.fillRect(KEY_W, py(p), W - KEY_W, kh)
         g.fillStyle = 'rgba(255,209,102,0.45)'
@@ -623,7 +632,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     }
   }
 
-  // 렌더 루프: 재생 중이거나 상태가 바뀐 경우에만 다시 그림
+  // render loop: redraw only while playing or when state changed
   useEffect(() => {
     let raf = 0
     const loop = () => {
@@ -646,7 +655,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 휠: 세로 스크롤 / Shift 가로 / Ctrl 가로 줌 / Alt 세로 줌
+  // wheel: vertical scroll / Shift horizontal / Ctrl horizontal zoom / Alt vertical zoom
   useEffect(() => {
     const el = canvasRef.current!
     const onWheel = (e: WheelEvent) => {
@@ -667,7 +676,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
         clampView()
         v.scrollY = rowPos * v.keyH - (my - GT)
       } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || my < GT) {
-        // 레인(미니맵/룰러/코드/파형) 위에서는 세로 휠도 가로 이동
+        // over the lanes (minimap/ruler/chords/waveform) the vertical wheel also scrolls horizontally
         v.x0 += (e.shiftKey || my < GT ? e.deltaY : e.deltaX) / v.pps
       } else {
         v.scrollY += e.deltaY
@@ -680,7 +689,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /** 박자 스냅. 반복 구간은 박 단위, 노트 편집은 snapDiv 단위. Shift = 자유 */
+  /** Beat snapping. Loop ranges snap to beats, note edits to snapDiv. Shift = free */
   function snap(t: number, free: boolean, div: number) {
     const { grid, duration } = propsRef.current
     t = Math.max(0, Math.min(duration, t))
@@ -715,7 +724,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
       centerMini(x)
       start('mini')
     } else if (y < L.rulerTop + RULER_H && x > KEY_W) {
-      // 반복 구간 가장자리 → 크기 조절, 그 외 → 클릭(이동) 또는 드래그(새 구간)
+      // loop edge -> resize; elsewhere -> click (seek) or drag (new range)
       const lp = P.loop
       const edge = lp && Math.abs(tx(lp.start) - x) < 6 ? 'loopStart' : lp && Math.abs(tx(lp.end) - x) < 6 ? 'loopEnd' : null
       if (edge && lp) loopDraft.current = { ...lp }
@@ -727,7 +736,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
         P.engine?.seek(c.start)
       }
     } else if (y < L.gridTop && x > KEY_W) {
-      // 파형 레인 클릭 = 이동
+      // click on waveform lane = seek
       P.engine?.seek(Math.max(0, xToT(x)))
       start('ruler')
     } else if (x < KEY_W && y > L.gridTop) {
@@ -849,7 +858,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     dirty.current = true
   }
 
-  // 편집 모드: 빈 곳 더블클릭 = 노트 추가 (1박 길이)
+  // edit mode: double-click empty space = add note (1 beat long)
   function onDoubleClick(e: React.MouseEvent) {
     const P = propsRef.current
     const { x, y } = pos(e)
@@ -860,7 +869,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
     P.engine?.preview(note.pitch, 0.3)
   }
 
-  // 편집 모드: 노트 우클릭 = 삭제
+  // edit mode: right-click note = delete
   function onContextMenu(e: React.MouseEvent) {
     const P = propsRef.current
     if (!P.editMode) return

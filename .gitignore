@@ -1,7 +1,19 @@
+# dependencies / build
 node_modules/
 dist/
 .venv/
 __pycache__/
+*.pyc
+
+# runtime data and downloaded model weights
 backend/data/
 backend/models/
+
+# local tool settings
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
 *.log

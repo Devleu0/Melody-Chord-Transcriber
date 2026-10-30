@@ -1,38 +1,37 @@
 @echo off
-chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
-echo [yt-amt] 실행 준비 중...
+echo [yt-amt] Preparing to start...
 
-rem --- 필수 도구 확인 ---
-where python >nul 2>nul || (echo [오류] python 이 PATH 에 없습니다. & pause & exit /b 1)
-where npm >nul 2>nul || (echo [오류] npm^(Node.js^) 이 PATH 에 없습니다. & pause & exit /b 1)
-where ffmpeg >nul 2>nul || (echo [오류] ffmpeg 이 PATH 에 없습니다. & pause & exit /b 1)
+rem --- Check required tools ---
+where python >nul 2>nul || (echo [ERROR] python is not on PATH. & pause & exit /b 1)
+where npm >nul 2>nul || (echo [ERROR] npm^(Node.js^) is not on PATH. & pause & exit /b 1)
+where ffmpeg >nul 2>nul || (echo [ERROR] ffmpeg is not on PATH. & pause & exit /b 1)
 
-rem --- 첫 실행 시 의존성 설치 ---
+rem --- Install dependencies on first run ---
 if not exist "backend\.venv\Scripts\python.exe" (
-    echo [yt-amt] 백엔드 의존성 설치 중 ^(처음 한 번, 수 분 소요^)...
+    echo [yt-amt] Installing backend dependencies ^(first run only, takes a few minutes^)...
     python -m uv --version >nul 2>nul || python -m pip install --user uv || goto :fail
     pushd backend
     python -m uv sync --python 3.11 || (popd & goto :fail)
     popd
 )
 if not exist "frontend\node_modules" (
-    echo [yt-amt] 프론트엔드 의존성 설치 중...
+    echo [yt-amt] Installing frontend dependencies...
     pushd frontend
     call npm install || (popd & goto :fail)
     popd
 )
 
-rem --- 서버 실행 (각각 별도 창) ---
-echo [yt-amt] 백엔드 시작 (http://localhost:8000)
+rem --- Start servers (each in its own window) ---
+echo [yt-amt] Starting backend (http://localhost:8000)
 start "yt-amt backend" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000"
 
-echo [yt-amt] 프론트엔드 시작 (http://localhost:5173)
+echo [yt-amt] Starting frontend (http://localhost:5173)
 start "yt-amt frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 
-rem --- 프론트엔드가 뜰 때까지 기다렸다가 브라우저 열기 ---
+rem --- Wait for the frontend to come up, then open the browser ---
 set /a tries=0
 :wait
 timeout /t 1 /nobreak >nul
@@ -41,11 +40,11 @@ powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing http://
 if errorlevel 1 if %tries% lss 30 goto :wait
 
 start "" http://localhost:5173
-echo [yt-amt] 실행 완료. 종료하려면 열린 두 서버 창을 닫으세요.
+echo [yt-amt] Started. Close the two server windows to stop.
 timeout /t 3 >nul
 exit /b 0
 
 :fail
-echo [오류] 설치에 실패했습니다. 위 메시지를 확인하세요.
+echo [ERROR] Installation failed. See the messages above.
 pause
 exit /b 1

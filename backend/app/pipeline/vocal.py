@@ -1,4 +1,4 @@
-"""보컬 stem -> RMVPE f0 -> 노트 분할."""
+"""Vocal stem -> RMVPE f0 -> note segmentation."""
 from pathlib import Path
 
 import librosa
@@ -9,7 +9,7 @@ from .rmvpe import HOP, RMVPE, SR
 
 FPS = SR / HOP  # 100
 
-# UI 에서 조정 가능한 파라미터와 기본값
+# Parameters adjustable from the UI, with defaults
 DEFAULT_PARAMS = {"conf_threshold": 0.3, "min_note_sec": 0.08, "silence_db": -40.0}
 
 _model: RMVPE | None = None
@@ -23,13 +23,13 @@ def _get_model() -> RMVPE:
 
 
 def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
-    """True 구간들의 [start, end) 프레임 목록."""
+    """List of [start, end) frame ranges where the mask is True."""
     d = np.diff(np.concatenate([[0], mask.astype(np.int8), [0]]))
     return list(zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)))
 
 
 def _analyze(wav: Path, cache: Path | None) -> dict[str, np.ndarray]:
-    """f0/신뢰도/에너지/온셋. 재채보 시 GPU 추론을 건너뛰도록 npz 로 캐시."""
+    """f0/confidence/energy/onsets. Cached as npz so re-transcription skips GPU inference."""
     if cache and cache.exists():
         return dict(np.load(cache))
     audio, _ = librosa.load(str(wav), sr=SR, mono=True)
@@ -53,7 +53,7 @@ def transcribe_vocal(wav: Path, params: dict | None = None, cache: Path | None =
     onsets = set(a["onsets"].tolist())
     n = len(f0)
 
-    # 분리 잔향/숨소리 제거용 에너지 게이트 (최대 대비 silence_db 이하 무시)
+    # Energy gate to drop residual reverb/breaths from separation (ignore frames below silence_db relative to the max)
     voiced = (f0 > 0) & (conf >= p["conf_threshold"]) & (db > p["silence_db"])
     midi = np.zeros(n, dtype=np.float32)
     midi[voiced] = librosa.hz_to_midi(f0[voiced])
@@ -64,11 +64,11 @@ def transcribe_vocal(wav: Path, params: dict | None = None, cache: Path | None =
         if b0 - a0 < min_frames:
             continue
         seg = midi[a0:b0]
-        # 비브라토(±0.5 반음 내외)는 평활화해 하나의 음으로 본다
+        # Smooth out vibrato (about ±0.5 semitone) so it reads as one note
         smooth = median_filter(seg, size=min(9, (b0 - a0) | 1), mode="nearest")
         q = np.round(smooth).astype(int)
 
-        # 반올림 음높이가 min_frames 이상 유지될 때만 경계로 인정
+        # Accept a boundary only when the rounded pitch holds for at least min_frames
         bounds = [0]
         cur = q[0]
         i = 1
@@ -100,6 +100,6 @@ def transcribe_vocal(wav: Path, params: dict | None = None, cache: Path | None =
                 "velocity": velocity,
             })
 
-    # 피아노롤에 겹쳐 그릴 연속 피치 곡선 (무성 = None)
+    # Continuous pitch curve drawn over the piano roll (unvoiced = None)
     curve = [round(float(m), 2) if v else None for m, v in zip(midi, voiced)]
     return {"notes": notes, "pitch_curve": {"fps": FPS, "values": curve}, "params": p}

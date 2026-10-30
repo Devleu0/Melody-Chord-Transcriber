@@ -1,69 +1,169 @@
-# yt-amt — YouTube 오디오 멜로디 채보
+<div align="center">
 
-YouTube 링크 → 오디오 다운로드 → 보컬/반주 분리 → 채보 → 웹 피아노롤(DAW 스타일)
+# yt-amt
 
+**Paste a YouTube link, get the melody and chords on a DAW-style piano roll.**
+
+English · [한국어](README.ko.md)
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.11](https://img.shields.io/badge/python-3.11-3776ab.svg)
+![Node 18+](https://img.shields.io/badge/node-18%2B-339933.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)
+
+![Demo: playback follows the vocal line; clicking a chord loops it](docs/images/demo.gif)
+
+</div>
+
+yt-amt is a local web app for **automatic music transcription (AMT)**. It downloads the audio of a YouTube video, separates vocals from the accompaniment, transcribes the vocal melody, the accompaniment and the chord progression, and shows everything on a piano roll you can play, loop, slow down, edit and export.
+
+Everything runs on your machine. A 4 GB GPU is enough; CPU-only also works, just slower.
+
+![Main view: chord lane with roman numerals, vocal notes with the pitch curve, accompaniment, waveform and minimap](docs/images/main-en.png)
+
+## Features
+
+- **Source separation**: Mel-Band RoFormer (vocals / accompaniment) or Demucs `htdemucs_ft` (vocals / bass / other / drums).
+- **Vocal melody**: RMVPE pitch tracking, then note segmentation that handles vibrato and repeated notes. The continuous pitch curve is drawn over the notes.
+- **Accompaniment**: polyphonic transcription with Spotify's Basic Pitch.
+- **Chords**: BTC transformer (170 chord classes: 7ths, sus, dim, aug…), beat-synchronous smoothing and slash chords from the bass line. Roman numerals and function colors relative to the detected key.
+- **DAW-style piano roll**: vertical keyboard, bar ruler, chord lane, waveform, minimap, per-track mute / solo / volume, synth playback of the transcription on top of the original.
+- **Practice tools**: beat-snapped loop regions, pitch-preserving 0.5×–0.9× speed, scale highlighting that marks out-of-key notes.
+- **Editing**: move / resize / add / delete notes, quantize, undo / redo, autosave. Re-transcribe a single track with different sensitivity in seconds.
+- **Export**: MIDI (all tracks + chord track), chord lead sheet (.txt), MusicXML (melody + chord symbols) for MuseScore and other notation apps.
+- **UI in English and Korean** (auto-detected, switchable).
+
+| Edit mode | Per-track sensitivity |
+|---|---|
+| ![Edit mode](docs/images/edit-en.png) | ![Transcription settings](docs/images/settings-en.png) |
+
+## How it works
+
+```mermaid
+flowchart LR
+  A[YouTube URL] -->|yt-dlp + ffmpeg| B[source.wav]
+  B -->|audio-separator<br/>Mel-RoFormer / Demucs| C[vocals.wav]
+  B --> D[accompaniment.wav]
+  C -->|RMVPE f0 → note segmentation| E[vocal notes + pitch curve]
+  D -->|Basic Pitch| F[accompaniment notes]
+  D -->|BTC + Viterbi + bass| G[chords]
+  B -->|librosa| H[beats / tempo]
+  E & F & G & H --> I[result.json + MIDI]
+  I --> J[React piano roll<br/>Canvas 2D + Web Audio]
 ```
-yt-dlp(+ffmpeg) → audio-separator (Mel-RoFormer | Demucs htdemucs_ft)
-                → 보컬: RMVPE f0 → 노트 분할      (backend/app/pipeline/vocal.py)
-                → 반주: Basic Pitch (ONNX)         (backend/app/pipeline/accomp.py)
-                → result.json + MIDI
-                → React + Canvas2D 피아노롤 + Web Audio 스템 재생
-```
 
-## 실행
+The backend is FastAPI with a single GPU worker queue. The frontend is React + TypeScript (Vite). The piano roll is drawn on a single Canvas 2D element, and all stems play in sync through the Web Audio API.
 
-요구 사항: Python 3.11 (uv), Node 18+, ffmpeg, (선택) NVIDIA GPU
+## Quick start
+
+**Requirements:** Python 3.9+ (only used to install [uv](https://github.com/astral-sh/uv), which then sets up Python 3.11), Node.js 18+, [ffmpeg](https://ffmpeg.org/download.html) on `PATH`. An NVIDIA GPU with CUDA 12 drivers is optional but recommended.
 
 ```bash
+git clone https://github.com/Devleu0/yt-amt.git
+cd yt-amt
+```
+
+| OS | Run |
+|---|---|
+| Windows | double-click `run.bat` |
+| macOS / Linux | `./run.sh` |
+
+The first run installs the dependencies, which takes a few minutes. The script then starts the backend on `:8000` and the frontend on `:5173` and opens your browser. Model weights (about 1 GB in total) download automatically the first time each model is used.
+
+<details>
+<summary>Manual setup</summary>
+
+```bash
+# backend
 cd backend
-python -m uv sync
-.venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
-```
+python -m pip install uv
+python -m uv sync                 # creates .venv with Python 3.11
+.venv/Scripts/python -m uvicorn app.main:app --port 8000   # Windows
+.venv/bin/python -m uvicorn app.main:app --port 8000       # macOS / Linux
 
-```bash
+# frontend (another terminal)
 cd frontend
 npm install
-npm run dev
+npm run dev                        # http://localhost:5173
 ```
 
-http://localhost:5173 에 접속합니다. 모델 가중치는 첫 실행 때 `backend/models/`에 자동으로 받아집니다.
+</details>
 
-## 분리 엔진
+**Performance** (RTX 3050 Laptop, 4 GB): a 3:30 song takes about 2 minutes end to end with RoFormer. Re-running chord analysis takes about 5 s. Re-transcribing the vocals takes a few seconds, because the pitch analysis is cached. On macOS the models run on the CPU.
 
-| 엔진 | 트랙 | 채보 |
+## Usage
+
+1. Paste a YouTube link, choose **RoFormer** (vocals + accompaniment) or **Demucs** (4 stems), and press **Transcribe**.
+2. When it finishes, press **Space** to play. Mute the mix and turn on a track's **Synth** to hear the transcription.
+3. Drag on the bar ruler, or click a chord, to set a loop. Use **Speed** to slow the loop down.
+4. Press **E** to edit. Changes save automatically and the MIDI files are regenerated.
+5. Use **Export ▾** for MIDI, the lead sheet or MusicXML. Use **History** to reopen, download stems from, or delete past jobs.
+
+<img src="docs/images/history-en.png" alt="History drawer" width="720">
+
+| Shortcut | Action |
+|---|---|
+| `Space` / `Home` | play-pause / jump to start (or loop start) |
+| `←` `→` | move one bar |
+| `L` / `Esc` | toggle loop / clear selection or loop |
+| `E` / `Q` | edit mode / quantize target track |
+| `Ctrl+Z` / `Ctrl+Shift+Z` | undo / redo |
+| `Delete`, right-click | delete note (edit mode) |
+| double-click | add a note (edit mode) |
+| `F` / `+` `−` | fit to notes / zoom time |
+| `Ctrl` + wheel / `Alt` + wheel | zoom time / key height |
+
+<details>
+<summary>HTTP API</summary>
+
+| Method | Path | Description |
 |---|---|---|
-| RoFormer (`vocals_mel_band_roformer.ckpt`) | 보컬, 반주 | 보컬=RMVPE, 반주=Basic Pitch |
-| Demucs (`htdemucs_ft`) | 보컬, 베이스, 기타 악기, 드럼 (+반주 합) | 보컬=RMVPE, 베이스/기타=Basic Pitch, 드럼=재생만 |
+| `POST` | `/api/jobs` | `{url, separator: "roformer" \| "demucs"}` → job |
+| `GET` | `/api/jobs`, `/api/jobs/{id}` | list / status |
+| `DELETE` | `/api/jobs/{id}` | delete a finished job and its files |
+| `GET` | `/api/jobs/{id}/result` | notes, pitch curve, beats, chords |
+| `PUT` | `/api/jobs/{id}/tracks/{track}/notes` | save edited notes (regenerates MIDI) |
+| `POST` | `/api/jobs/{id}/tracks/{track}/retranscribe` | re-run one track with new parameters |
+| `POST` | `/api/jobs/{id}/chords` | re-run chord analysis (`change_penalty`) |
+| `GET` | `/api/jobs/{id}/musicxml?track=vocals` | MusicXML lead sheet |
+| `GET` | `/api/jobs/{id}/audio?path=…&speed=0.75` | pitch-preserving time-stretched audio |
+| `GET` | `/files/{id}/…` | stems (`stems/*.wav`) and MIDI (`midi/*.mid`) |
 
-## 코드 진행 분석
+</details>
 
-반주 stem → BTC (Bi-directional Transformer, ISMIR 2019, 170 클래스, MIT) 프레임 확률 → 비트 단위 평균 → Viterbi 평활화 → 베이스음으로 전위(F/A) 판정.
-가중치를 쓸 수 없으면 CQT 크로마 + 장/단 3화음 템플릿으로 대체한다. 가중치는 SHA-256 검증 후 `weights_only=True`로 로드한다.
-모델 코드는 `backend/app/pipeline/btc/`에 그대로 포함(원본 라이선스 동봉).
-
-## 피아노롤 조작
-
-- Space: 재생/정지, Home: 처음으로
-- 휠: 세로 스크롤 / Shift+휠: 가로 / Ctrl+휠: 시간 줌 / Alt+휠: 건반 높이
-- 룰러 클릭/드래그: 탐색, 건반 클릭: 음 미리듣기, 노트 클릭: 선택 + 미리듣기, 빈 곳 드래그: 이동
-- 트랙: M(음소거) S(솔로) 노트(표시) 신스(채보 결과를 신스로 재생) — 원곡과 채보를 겹쳐 들으며 검증
-- 레인: 미니맵(클릭/드래그 이동) · 마디 룰러(드래그 = 반복 구간) · 코드(호버 = 구성음, 클릭 = 그 코드 반복) · 파형
-- E 편집 모드: 드래그 이동, 끝 드래그 길이, 더블클릭 추가, 우클릭/Delete 삭제, Q 퀀타이즈, Ctrl+Z/Ctrl+Shift+Z — 0.6초 후 자동 저장, MIDI 재생성
-- ⚙: 트랙별 채보 민감도 / 코드 변경 억제 조절 후 해당 부분만 재처리 (보컬 f0 는 캐시되어 수 초)
-- F 화면 맞춤, +/− 줌, ←/→ 마디 이동, L 반복, 속도 0.5–0.9×(음정 유지), 마스터 볼륨
-- 내보내기: 전체/코드 MIDI, 코드 리드시트(.txt), MusicXML(트랙 선율 + 코드 심볼)
-
-## 구조
+## Project layout
 
 ```
 backend/app/
-  main.py          FastAPI (POST/GET /api/jobs, /files 정적 제공)
-  jobs.py          단일 GPU 워커 큐, data/jobs/{id}/ 에 결과 저장
-  pipeline/        download / separate / rmvpe / vocal / accomp / export
+  main.py            FastAPI routes
+  jobs.py            job queue, result editing, MIDI regeneration
+  pipeline/          download · separate · rmvpe · vocal · accomp · chords · export
+  pipeline/btc/      vendored BTC model (MIT)
 frontend/src/
-  App.tsx          작업 제출·진행률·트랜스포트
-  audio/engine.ts  Web Audio 다중 스템 동기 재생 + 노트 신스
-  components/PianoRoll.tsx  Canvas2D 피아노롤 (세로 건반, 룰러, 노트, 피치 곡선)
+  App.tsx            transport, mixer state, editing, shortcuts
+  components/        PianoRoll (canvas), TrackPanel, HistoryPanel
+  audio/engine.ts    synced multi-stem playback, loop, speed, synth
+  music/             key detection, chord naming, beat grid
+  i18n.tsx           English / Korean strings
 ```
 
-YouTube 콘텐츠는 개인 학습/연구 용도로만 사용하세요.
+## Troubleshooting
+
+- **Download fails with "Sign in to confirm" or a JS challenge error**: update yt-dlp (`cd backend && python -m uv lock --upgrade-package yt-dlp && python -m uv sync`). yt-dlp uses Deno, or Node as a fallback, to solve YouTube's JS challenges.
+- **CUDA out of memory**: use shorter songs (the limit is 15 minutes, set by `MAX_DURATION_SEC` in `backend/app/config.py`), or close other GPU applications.
+- **No sound**: the browser blocks audio until you interact with the page, so press Play once. Check the 🔊 master volume and the mute (M) buttons.
+- **Chords look busy or sluggish**: open ⚙ on the Chords track and change the *chord change penalty*.
+
+## Disclaimer
+
+This project is for personal study, research and practice. Downloading content from YouTube may violate its [Terms of Service](https://www.youtube.com/t/terms) unless you have the right to do so. Respect copyright, and do not redistribute transcriptions of copyrighted music without permission. Transcriptions are automatic and will contain mistakes.
+
+## Acknowledgements
+
+Built on [yt-dlp](https://github.com/yt-dlp/yt-dlp), [python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator), [Mel-Band RoFormer vocal model](https://github.com/KimberleyJensen/Mel-Band-Roformer-Vocal-Model), [Demucs](https://github.com/facebookresearch/demucs), [RMVPE](https://arxiv.org/abs/2306.15412), [Basic Pitch](https://github.com/spotify/basic-pitch), [BTC](https://github.com/jayg996/BTC-ISMIR19), [librosa](https://github.com/librosa/librosa) and [music21](https://github.com/cuthbertLab/music21). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for licenses.
+
+The demo shows **"Same Boat" by [Josh Woodward](https://www.joshwoodward.com/)**, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+## License
+
+[MIT](LICENSE) © 2026 Devleu

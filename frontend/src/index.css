@@ -102,6 +102,10 @@ select {
   opacity: 0.5;
   cursor: default;
 }
+.seg.lang button {
+  padding: 6px 8px;
+  font-size: 12px;
+}
 .history-btn {
   padding: 6px 10px;
   border-radius: 6px;
@@ -119,7 +123,7 @@ select {
   font-size: 11px;
 }
 
-/* --- 작업 기록 드로어 --- */
+/* --- Job history drawer --- */
 .drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -489,7 +493,7 @@ select {
   color: #ffc078;
 }
 
-/* --- 편집 바 / 선택 정보 / 상태 표시줄 --- */
+/* --- Edit bar / selection info / status bar --- */
 .editbar {
   display: flex;
   align-items: center;

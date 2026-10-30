@@ -1,4 +1,4 @@
-"""단일 GPU 워커로 작업을 순차 처리하는 간단한 in-process 큐와 결과 편집 연산."""
+"""Simple in-process queue that runs jobs sequentially on a single GPU worker, plus result-editing operations."""
 import json
 import queue
 import shutil
@@ -13,7 +13,7 @@ from .config import DATA_DIR
 
 STAGES = ["queued", "downloading", "separating", "transcribing", "chords", "finalizing", "done"]
 
-# 파이프라인 워커와 재분석 API 가 GPU 를 동시에 쓰지 않도록 직렬화
+# Serialize so the pipeline worker and re-analysis APIs never use the GPU at the same time
 gpu_lock = threading.Lock()
 
 
@@ -23,7 +23,8 @@ class Job:
     url: str
     separator: str
     status: str = "queued"
-    message: str = "대기 중"
+    message: str = "Queued"
+    detail: str | None = None
     progress: float = 0.0
     error: str | None = None
     meta: dict = field(default_factory=dict)
@@ -39,7 +40,7 @@ class Job:
 
 
 def _bass_notes(result: dict) -> list[dict]:
-    """전위 판정용 저음 노트: demucs 는 베이스 트랙, 그 외는 반주의 E3 이하."""
+    """Bass notes for inversion detection: the bass track for demucs, otherwise accompaniment notes at or below E3."""
     tracks = {t["id"]: t for t in result["tracks"]}
     if "bass" in tracks and tracks["bass"].get("notes") is not None:
         return tracks["bass"]["notes"]
@@ -63,7 +64,7 @@ class JobManager:
         for f in DATA_DIR.glob("*/job.json"):
             job = Job(**json.loads(f.read_text(encoding="utf-8")))
             if job.status not in ("done", "error"):
-                job.status, job.error, job.message = "error", "서버 재시작으로 중단됨", "중단됨"
+                job.status, job.error, job.message = "error", "Interrupted by server restart", "Interrupted"
             self.jobs[job.id] = job
 
     def submit(self, url: str, separator: str) -> Job:
@@ -78,12 +79,13 @@ class JobManager:
         if job is None:
             raise KeyError(job_id)
         if job.status not in ("done", "error"):
-            raise RuntimeError("진행 중인 작업은 삭제할 수 없습니다")
+            raise RuntimeError("Cannot delete a job that is still in progress")
         del self.jobs[job_id]
         shutil.rmtree(job.dir, ignore_errors=True)
 
-    def _update(self, job: Job, status: str, message: str, progress: float) -> None:
+    def _update(self, job: Job, status: str, message: str, progress: float, detail: str | None = None) -> None:
         job.status, job.message, job.progress = status, message, progress
+        job.detail = detail
         job.save()
 
     def _worker(self) -> None:
@@ -97,10 +99,10 @@ class JobManager:
             except Exception as e:
                 traceback.print_exc()
                 job.error = str(e)
-                self._update(job, "error", "실패", job.progress)
+                self._update(job, "error", "Failed", job.progress)
 
     def _run(self, job: Job) -> None:
-        # 무거운 모듈은 워커에서 지연 import (서버 기동을 빠르게)
+        # Lazy-import heavy modules in the worker (keeps server startup fast)
         from .pipeline.accomp import transcribe_poly
         from .pipeline.chords import recognize_chords
         from .pipeline.download import download_audio
@@ -108,24 +110,24 @@ class JobManager:
         from .pipeline.separate import separate
         from .pipeline.vocal import transcribe_vocal
 
-        self._update(job, "downloading", "YouTube 오디오 다운로드 중", 0.05)
+        self._update(job, "downloading", "Downloading YouTube audio", 0.05)
         job.meta = download_audio(job.url, job.dir)
         source = job.dir / "source.wav"
 
-        self._update(job, "separating", f"음원 분리 중 ({job.separator})", 0.15)
+        self._update(job, "separating", f"Separating sources ({job.separator})", 0.15, detail=job.separator)
         stems = separate(source, job.dir / "stems", job.separator)
 
-        # 채보 대상: 보컬은 RMVPE, 나머지는 Basic Pitch. 드럼은 재생만.
+        # Transcription targets: RMVPE for vocals, Basic Pitch for the rest. Drums are playback only.
         targets = ["vocals"] + (["bass", "other"] if job.separator == "demucs" else ["accompaniment"])
         transcribed: dict[str, dict] = {}
         for i, name in enumerate(targets):
-            self._update(job, "transcribing", f"채보 중: {name}", 0.5 + 0.3 * i / len(targets))
+            self._update(job, "transcribing", f"Transcribing: {name}", 0.5 + 0.3 * i / len(targets), detail=name)
             if name == "vocals":
                 transcribed[name] = transcribe_vocal(stems[name], cache=job.dir / "vocal_f0.npz")
             else:
                 transcribed[name] = transcribe_poly(stems[name], name)
 
-        self._update(job, "chords", "비트 / 코드 진행 분석 중", 0.85)
+        self._update(job, "chords", "Analyzing beats / chord progression", 0.85)
         beats = analyze_beats(source)
         tracks = [{"id": "mix", "kind": "audio", "audio": "source.wav"}]
         for stem in stems:
@@ -139,12 +141,12 @@ class JobManager:
         result = {"job_id": job.id, "meta": job.meta, "separator": job.separator, **beats, "tracks": tracks}
         result["chords"] = recognize_chords(stems["accompaniment"], beats["beats"], _duration(job.dir), _bass_notes(result))
 
-        self._update(job, "finalizing", "MIDI 생성", 0.95)
+        self._update(job, "finalizing", "Generating MIDI", 0.95)
         save_result(job.dir, result)
-        self._update(job, "done", "완료", 1.0)
+        self._update(job, "done", "Done", 1.0)
 
 
-# --- 결과 편집 연산 (API 에서 호출) ---
+# --- Result-editing operations (called from the API) ---
 
 
 def load_result(job_dir: Path) -> dict:
@@ -152,7 +154,7 @@ def load_result(job_dir: Path) -> dict:
 
 
 def save_result(job_dir: Path, result: dict) -> None:
-    """result.json 저장 + MIDI 재생성 (전체 / 트랙별 / 코드)."""
+    """Save result.json + regenerate MIDI (full / per-track / chords)."""
     from .pipeline.export import write_midi
 
     midi_dir = job_dir / "midi"

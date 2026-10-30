@@ -28,7 +28,7 @@ def _gen_timing_signal(length, channels, min_timescale=1.0, max_timescale=1.0e4)
             math.log(float(max_timescale) / float(min_timescale)) /
             (float(num_timescales) - 1))
     inv_timescales = min_timescale * np.exp(
-        np.arange(num_timescales).astype(np.float64) * -log_timescale_increment)  # np.float 은 numpy>=1.24 에서 제거됨
+        np.arange(num_timescales).astype(np.float64) * -log_timescale_increment)  # np.float was removed in numpy>=1.24
     scaled_time = np.expand_dims(position, 1) * np.expand_dims(inv_timescales, 0)
 
     signal = np.concatenate([np.sin(scaled_time), np.cos(scaled_time)], axis=1)
