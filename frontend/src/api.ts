@@ -19,4 +19,6 @@ export const api = {
   getJob: (id: string) => fetch(`/api/jobs/${id}`).then(json<Job>),
   getResult: (id: string) => fetch(`/api/jobs/${id}/result`).then(json<Result>),
   fileUrl: (jobId: string, path: string) => `/files/${jobId}/${path}`,
+  stretchUrl: (jobId: string, path: string, speed: number) =>
+    `/api/jobs/${jobId}/audio?path=${encodeURIComponent(path)}&speed=${speed}`,
 }

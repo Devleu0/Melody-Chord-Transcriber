@@ -1,3 +1,4 @@
+import subprocess
 from dataclasses import asdict
 from typing import Literal
 
@@ -50,6 +51,33 @@ def get_result(job_id: str):
     if not job or not path.exists():
         raise HTTPException(404, "result not ready")
     return FileResponse(path, media_type="application/json")
+
+
+SPEEDS = {0.5, 0.6, 0.75, 0.9}
+
+
+@app.get("/api/jobs/{job_id}/audio")
+def get_stretched_audio(job_id: str, path: str, speed: float):
+    """음정 유지 속도 변환(ffmpeg atempo) 오디오. 결과는 job 폴더에 캐시."""
+    if speed not in SPEEDS:
+        raise HTTPException(400, f"speed must be one of {sorted(SPEEDS)}")
+    job_dir = (DATA_DIR / job_id).resolve()
+    src = (job_dir / path).resolve()
+    if job_dir not in src.parents or src.suffix != ".wav" or not src.exists():
+        raise HTTPException(404, "audio not found")
+    out = job_dir / "speed" / f"{speed}" / src.relative_to(job_dir)
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_suffix(".tmp.wav")
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-filter:a", f"atempo={speed}", str(tmp)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise HTTPException(500, f"ffmpeg 실패: {proc.stderr[-300:]}")
+        tmp.replace(out)
+    return FileResponse(out, media_type="audio/wav")
 
 
 # 스템 wav / MIDI 파일 (data/jobs/{id}/...)

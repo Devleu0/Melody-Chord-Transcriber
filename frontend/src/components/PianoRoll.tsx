@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import type { AudioEngine } from '../audio/engine'
+import type { AudioEngine, LoopRange } from '../audio/engine'
+import { scaleSet, type Key } from '../music/key'
 import type { Note, TrackData, TrackState } from '../types'
 
 const KEY_W = 72
@@ -12,6 +13,7 @@ const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 export const pitchName = (p: number) => `${NAMES[p % 12]}${Math.floor(p / 12) - 1}`
 const isBlack = (p: number) => BLACK.has(p % 12)
+const midiHz = (p: number) => 440 * 2 ** ((p - 69) / 12)
 
 const C = {
   bg: '#16181d',
@@ -44,6 +46,10 @@ interface Props {
   follow: boolean
   selected: Note | null
   onSelect: (n: Note | null, trackId: string | null) => void
+  scaleKey: Key | null
+  loop: LoopRange | null
+  loopOn: boolean
+  onLoopChange: (r: LoopRange | null) => void
 }
 
 export function PianoRoll(props: Props) {
@@ -52,6 +58,12 @@ export function PianoRoll(props: Props) {
   const propsRef = useRef(props)
   const view = useRef<View>({ x0: 0, pps: 120, scrollY: 0, keyH: 14 })
   const dirty = useRef(true)
+  // 룰러 드래그 중인 반복 구간 (놓을 때 onLoopChange 로 확정)
+  const loopDraft = useRef<LoopRange | null>(null)
+  // 마우스 위치의 노트 또는 건반 (툴팁 표시용)
+  const hover = useRef<
+    { kind: 'note'; note: Note; track: string; x: number; y: number } | { kind: 'key'; pitch: number; x: number; y: number } | null
+  >(null)
   propsRef.current = props
   dirty.current = true
 
@@ -112,7 +124,9 @@ export function PianoRoll(props: Props) {
     }
     const g = el.getContext('2d')!
     g.setTransform(dpr, 0, 0, dpr, 0, 0)
-    const { engine, tracks, states, beats, follow, selected } = propsRef.current
+    const { engine, tracks, states, beats, follow, selected, scaleKey, loopOn } = propsRef.current
+    const loop = loopDraft.current ?? propsRef.current.loop
+    const scale = scaleKey ? scaleSet(scaleKey) : null
     const v = view.current
     const now = engine?.currentTime ?? 0
 
@@ -137,6 +151,16 @@ export function PianoRoll(props: Props) {
       if (isBlack(p)) {
         g.fillStyle = C.rowBlack
         g.fillRect(KEY_W, y, W - KEY_W, kh)
+      }
+      if (scale) {
+        // 스케일 밖 음은 어둡게, 으뜸음은 은은하게 강조
+        if (!scale.has(p % 12)) {
+          g.fillStyle = 'rgba(0,0,0,0.32)'
+          g.fillRect(KEY_W, y, W - KEY_W, kh)
+        } else if (p % 12 === scaleKey!.tonic) {
+          g.fillStyle = 'rgba(255,209,102,0.06)'
+          g.fillRect(KEY_W, y, W - KEY_W, kh)
+        }
       }
       g.fillStyle = p % 12 === 0 ? C.octLine : C.rowLine
       g.fillRect(KEY_W, y + kh - 1, W - KEY_W, 1)
@@ -201,9 +225,15 @@ export function PianoRoll(props: Props) {
         g.globalAlpha = 1
         g.fillStyle = 'rgba(0,0,0,0.35)'
         g.fillRect(x, y + 1, 2, kh - 2)
-        if (n === selected) {
-          g.strokeStyle = '#fff'
-          g.lineWidth = 2
+        if (scale && !scale.has(n.pitch % 12)) {
+          // 스케일 밖 노트 표시 (채보 오류 후보)
+          g.fillStyle = '#ff4d4f'
+          g.fillRect(x, y + kh - 3, w, 2)
+        }
+        const hv = hover.current
+        if (n === selected || (hv?.kind === 'note' && hv.note === n)) {
+          g.strokeStyle = n === selected ? '#fff' : 'rgba(255,255,255,0.6)'
+          g.lineWidth = n === selected ? 2 : 1
           g.strokeRect(x, y + 1, w, kh - 2)
         }
         if (w > 34 && kh >= 12) {
@@ -213,6 +243,17 @@ export function PianoRoll(props: Props) {
         }
         if (n.start <= now && now < n.end) sounding.set(n.pitch, st.color)
       }
+    }
+
+    // --- 반복 구간 (그리드) ---
+    const lx0 = loop ? Math.max(KEY_W, tx(loop.start)) : 0
+    const lx1 = loop ? tx(loop.end) : 0
+    if (loop && lx1 > KEY_W) {
+      g.fillStyle = loopOn ? 'rgba(255,209,102,0.06)' : 'rgba(255,255,255,0.025)'
+      g.fillRect(lx0, RULER_H, lx1 - lx0, H - RULER_H)
+      g.fillStyle = loopOn ? 'rgba(255,209,102,0.5)' : 'rgba(255,255,255,0.15)'
+      if (tx(loop.start) >= KEY_W) g.fillRect(lx0, RULER_H, 1, H - RULER_H)
+      g.fillRect(lx1, RULER_H, 1, H - RULER_H)
     }
 
     // --- 재생 헤드 ---
@@ -227,6 +268,10 @@ export function PianoRoll(props: Props) {
     g.fillRect(KEY_W, 0, W - KEY_W, RULER_H)
     g.fillStyle = C.octLine
     g.fillRect(KEY_W, RULER_H - 1, W - KEY_W, 1)
+    if (loop && lx1 > KEY_W) {
+      g.fillStyle = loopOn ? 'rgba(255,209,102,0.55)' : 'rgba(255,255,255,0.12)'
+      g.fillRect(lx0, 0, lx1 - lx0, RULER_H - 1)
+    }
     g.font = '11px system-ui, sans-serif'
     g.fillStyle = C.rulerText
     if (barIdx.length) {
@@ -267,8 +312,13 @@ export function PianoRoll(props: Props) {
     for (let p = pBot; p <= pTop; p++) {
       const y = py(p)
       const hl = sounding.get(p)
+      if (scale && !scale.has(p % 12) && !hl && !isBlack(p)) {
+        // 스케일 밖 흰건반은 회색 처리
+        g.fillStyle = '#a9aeb8'
+        g.fillRect(0, y, KEY_W, kh)
+      }
       if (isBlack(p)) {
-        g.fillStyle = hl ?? C.keyBlack
+        g.fillStyle = hl ?? (scale && !scale.has(p % 12) ? '#3a3e47' : C.keyBlack)
         g.fillRect(0, y, KEY_W * 0.62, kh)
       } else {
         if (hl) {
@@ -291,6 +341,45 @@ export function PianoRoll(props: Props) {
     g.fillRect(KEY_W - 1, RULER_H, 1, H - RULER_H)
     g.fillStyle = C.ruler
     g.fillRect(0, 0, KEY_W, RULER_H)
+
+    // --- 호버 툴팁 ---
+    const hv = hover.current
+    if (hv) {
+      const p = hv.kind === 'note' ? hv.note.pitch : hv.pitch
+      // 호버한 음의 행을 건반과 그리드에 은은하게 표시
+      g.fillStyle = 'rgba(255,255,255,0.05)'
+      g.fillRect(KEY_W, py(p), W - KEY_W, kh)
+      g.fillStyle = 'rgba(255,209,102,0.45)'
+      g.fillRect(0, py(p), KEY_W - 1, kh)
+
+      const lines =
+        hv.kind === 'note'
+          ? [
+              `${pitchName(p)}  ·  ${states.find((s) => s.id === hv.track)?.label ?? hv.track}`,
+              `${hv.note.start.toFixed(2)}s – ${hv.note.end.toFixed(2)}s  (${(hv.note.end - hv.note.start).toFixed(2)}s)`,
+              `MIDI ${p}  ·  vel ${hv.note.velocity}  ·  ${midiHz(p).toFixed(1)} Hz`,
+            ]
+          : [`${pitchName(p)}  ·  MIDI ${p}  ·  ${midiHz(p).toFixed(1)} Hz`]
+      g.font = '12px system-ui, sans-serif'
+      const tw = Math.max(...lines.map((l) => g.measureText(l).width)) + 16
+      const th = lines.length * 16 + 10
+      let bx = hv.x + 14
+      let by = hv.y + 16
+      if (bx + tw > W - 4) bx = hv.x - tw - 10
+      if (by + th > H - 4) by = hv.y - th - 8
+      g.fillStyle = 'rgba(12,14,18,0.94)'
+      g.strokeStyle = '#3a404c'
+      g.lineWidth = 1
+      g.beginPath()
+      g.roundRect(bx, by, tw, th, 5)
+      g.fill()
+      g.stroke()
+      lines.forEach((l, i) => {
+        g.fillStyle = i === 0 ? '#fff' : C.rulerText
+        g.font = i === 0 ? '600 12px system-ui, sans-serif' : '11px system-ui, sans-serif'
+        g.fillText(l, bx + 8, by + 17 + i * 16)
+      })
+    }
   }
 
   // 렌더 루프: 재생 중이거나 상태가 바뀐 경우에만 다시 그림
@@ -348,16 +437,34 @@ export function PianoRoll(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const drag = useRef<{ mode: 'seek' | 'pan'; x: number; y: number; x0: number; sy: number } | null>(null)
+  const drag = useRef<{
+    mode: 'ruler' | 'loopNew' | 'loopStart' | 'loopEnd' | 'pan'
+    x: number
+    y: number
+    x0: number
+    sy: number
+  } | null>(null)
+
+  /** 박자 격자에 스냅 (Shift = 자유) */
+  function snap(t: number, free: boolean) {
+    const { beats, duration } = propsRef.current
+    t = Math.max(0, Math.min(duration, t))
+    if (free || beats.length < 2) return t
+    let best = beats[0]
+    for (const b of beats) if (Math.abs(b - t) < Math.abs(best - t)) best = b
+    return best
+  }
 
   function onPointerDown(e: React.PointerEvent) {
     const rect = canvasRef.current!.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
-    const { engine, onSelect } = propsRef.current
+    const { engine, onSelect, loop } = propsRef.current
     if (y < RULER_H && x > KEY_W) {
-      engine?.seek(Math.max(0, xToT(x)))
-      drag.current = { mode: 'seek', x, y, x0: 0, sy: 0 }
+      // 기존 반복 구간 가장자리 → 크기 조절, 그 외 → 클릭(이동) 또는 드래그(새 구간)
+      const edge = loop && Math.abs(tx(loop.start) - x) < 6 ? 'loopStart' : loop && Math.abs(tx(loop.end) - x) < 6 ? 'loopEnd' : null
+      if (edge && loop) loopDraft.current = { ...loop }
+      drag.current = { mode: edge ?? 'ruler', x, y, x0: 0, sy: 0 }
     } else if (x < KEY_W && y > RULER_H) {
       engine?.preview(yToP(y))
     } else if (y > RULER_H) {
@@ -381,12 +488,30 @@ export function PianoRoll(props: Props) {
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
     if (!d) {
-      el.style.cursor = y < RULER_H ? 'col-resize' : x < KEY_W ? 'pointer' : hitNote(x, y) ? 'pointer' : 'grab'
+      const hit = y > RULER_H && x > KEY_W ? hitNote(x, y) : null
+      const prev = hover.current
+      if (hit) hover.current = { kind: 'note', note: hit.note, track: hit.track, x, y }
+      else if (x < KEY_W && y > RULER_H) hover.current = { kind: 'key', pitch: yToP(y), x, y }
+      else hover.current = null
+      if (prev || hover.current) dirty.current = true
+      const loop = propsRef.current.loop
+      const onEdge = !!loop && y < RULER_H && (Math.abs(tx(loop.start) - x) < 6 || Math.abs(tx(loop.end) - x) < 6)
+      el.style.cursor = onEdge ? 'ew-resize' : y < RULER_H ? 'text' : x < KEY_W || hit ? 'pointer' : 'grab'
       return
     }
-    if (d.mode === 'seek') {
-      propsRef.current.engine?.seek(Math.max(0, xToT(x)))
-    } else {
+    hover.current = null
+    if (d.mode === 'ruler' && Math.abs(x - d.x) > 4) d.mode = 'loopNew'
+    if (d.mode === 'loopNew') {
+      const a = snap(xToT(d.x), e.shiftKey)
+      const b = snap(xToT(x), e.shiftKey)
+      loopDraft.current = { start: Math.min(a, b), end: Math.max(a, b) }
+    } else if (d.mode === 'loopStart' || d.mode === 'loopEnd') {
+      const t = snap(xToT(x), e.shiftKey)
+      const cur = loopDraft.current!
+      const other = d.mode === 'loopStart' ? cur.end : cur.start
+      loopDraft.current = { start: Math.min(t, other), end: Math.max(t, other) }
+      d.mode = t <= other ? 'loopStart' : 'loopEnd'
+    } else if (d.mode === 'pan') {
       view.current.x0 = d.x0 - (x - d.x) / view.current.pps
       view.current.scrollY = d.sy - (y - d.y)
       clampView()
@@ -396,7 +521,24 @@ export function PianoRoll(props: Props) {
   }
 
   function onPointerUp() {
+    const d = drag.current
     drag.current = null
+    if (!d) return
+    const { engine, onLoopChange } = propsRef.current
+    if (d.mode === 'ruler') {
+      engine?.seek(Math.max(0, xToT(d.x)))
+    } else if (d.mode !== 'pan' && loopDraft.current) {
+      const r = loopDraft.current
+      onLoopChange(r.end - r.start >= 0.1 ? r : null)
+    }
+    loopDraft.current = null
+    dirty.current = true
+  }
+
+  function onPointerLeave() {
+    if (drag.current) return
+    hover.current = null
+    dirty.current = true
   }
 
   return (
@@ -407,6 +549,7 @@ export function PianoRoll(props: Props) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onPointerLeave={onPointerLeave}
       />
     </div>
   )

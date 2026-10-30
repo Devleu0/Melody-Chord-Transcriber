@@ -192,6 +192,40 @@ select {
 .chip.check {
   cursor: pointer;
 }
+.chip select {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+}
+.chip select option {
+  background: var(--panel);
+}
+.chip.btn {
+  border: 0;
+  cursor: pointer;
+}
+.chip.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chip.btn.active {
+  background: #5b4a1c;
+  color: #ffe8a3;
+}
+.chip.master {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip.master input {
+  width: 80px;
+  accent-color: var(--yellow);
+}
+.chip.master span {
+  min-width: 34px;
+  font-variant-numeric: tabular-nums;
+}
 .chip.sel {
   color: var(--text);
 }
