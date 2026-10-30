@@ -5,8 +5,9 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from . import jobs
 from .config import DATA_DIR
 from .jobs import JobManager
 
@@ -19,8 +20,34 @@ class JobRequest(BaseModel):
     separator: Literal["roformer", "demucs"] = "roformer"
 
 
+class NoteModel(BaseModel):
+    pitch: int = Field(ge=0, le=127)
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    velocity: int = Field(ge=1, le=127)
+
+
+class NotesRequest(BaseModel):
+    notes: list[NoteModel]
+
+
+class RetranscribeRequest(BaseModel):
+    params: dict[str, float] = {}
+
+
+class ChordRequest(BaseModel):
+    change_penalty: float = Field(default=3.0, ge=0.0, le=20.0)
+
+
 def _public(job) -> dict:
     return asdict(job)
+
+
+def _done_dir(job_id: str):
+    job = manager.jobs.get(job_id)
+    if not job or job.status != "done":
+        raise HTTPException(404, "완료된 작업이 아닙니다")
+    return job.dir
 
 
 @app.post("/api/jobs")
@@ -32,8 +59,8 @@ def create_job(req: JobRequest):
 
 @app.get("/api/jobs")
 def list_jobs():
-    jobs = sorted(manager.jobs.values(), key=lambda j: j.created_at, reverse=True)
-    return [_public(j) for j in jobs]
+    items = sorted(manager.jobs.values(), key=lambda j: j.created_at, reverse=True)
+    return [_public(j) for j in items]
 
 
 @app.get("/api/jobs/{job_id}")
@@ -44,6 +71,17 @@ def get_job(job_id: str):
     return _public(job)
 
 
+@app.delete("/api/jobs/{job_id}")
+def delete_job(job_id: str):
+    try:
+        manager.delete(job_id)
+    except KeyError:
+        raise HTTPException(404, "job not found")
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True}
+
+
 @app.get("/api/jobs/{job_id}/result")
 def get_result(job_id: str):
     job = manager.jobs.get(job_id)
@@ -51,6 +89,49 @@ def get_result(job_id: str):
     if not job or not path.exists():
         raise HTTPException(404, "result not ready")
     return FileResponse(path, media_type="application/json")
+
+
+@app.put("/api/jobs/{job_id}/tracks/{track}/notes")
+def put_notes(job_id: str, track: str, req: NotesRequest):
+    """편집한 노트 저장 + MIDI 재생성."""
+    try:
+        jobs.update_notes(_done_dir(job_id), track, [n.model_dump() for n in req.notes if n.end > n.start])
+    except KeyError:
+        raise HTTPException(404, "track not found")
+    return {"ok": True}
+
+
+@app.post("/api/jobs/{job_id}/tracks/{track}/retranscribe")
+def post_retranscribe(job_id: str, track: str, req: RetranscribeRequest):
+    """파라미터를 바꿔 해당 트랙만 다시 채보 (보컬은 f0 캐시 사용)."""
+    try:
+        return jobs.retranscribe(_done_dir(job_id), track, req.params)
+    except KeyError:
+        raise HTTPException(404, "track not found")
+
+
+@app.post("/api/jobs/{job_id}/chords")
+def post_chords(job_id: str, req: ChordRequest):
+    """코드 진행만 다시 분석 (기존 작업에도 사용)."""
+    return jobs.reanalyze_chords(_done_dir(job_id), req.change_penalty)
+
+
+@app.get("/api/jobs/{job_id}/musicxml")
+def get_musicxml(job_id: str, track: str = "vocals"):
+    """단선율 + 코드 심볼 리드시트 MusicXML."""
+    from .pipeline.export import write_musicxml
+
+    job_dir = _done_dir(job_id)
+    result = jobs.load_result(job_dir)
+    entry = next((t for t in result["tracks"] if t["id"] == track and t.get("notes") is not None), None)
+    if entry is None:
+        raise HTTPException(404, "track not found")
+    out = job_dir / "export" / f"{track}.musicxml"
+    out.parent.mkdir(exist_ok=True)
+    chords = (result.get("chords") or {}).get("chords") or []
+    title = (result.get("meta") or {}).get("title") or job_id
+    write_musicxml(entry["notes"], chords, result["beats"], result["tempo"], title, out)
+    return FileResponse(out, media_type="application/vnd.recordare.musicxml+xml", filename=f"{track}.musicxml")
 
 
 SPEEDS = {0.5, 0.6, 0.75, 0.9}

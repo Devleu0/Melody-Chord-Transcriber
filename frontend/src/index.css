@@ -102,12 +102,114 @@ select {
   opacity: 0.5;
   cursor: default;
 }
-.history {
-  max-width: 260px;
-  padding: 6px;
+.history-btn {
+  padding: 6px 10px;
   border-radius: 6px;
   border: 1px solid var(--line);
   background: var(--bg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.history-btn span {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* --- 작업 기록 드로어 --- */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+}
+.drawer {
+  width: min(520px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+.drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+.drawer-empty {
+  padding: 20px;
+  color: var(--muted);
+}
+.job {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.job.current {
+  background: var(--panel-2);
+}
+.job img,
+.job .thumb {
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.job-body {
+  flex: 1;
+  min-width: 0;
+}
+.job-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.job-sub {
+  display: flex;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+.status.done {
+  color: #69db7c;
+}
+.status.error {
+  color: #ff8787;
+}
+.job-files {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 11px;
+}
+.job-files a {
+  color: var(--muted);
+}
+.job-err {
+  color: #ff8787;
+  font-size: 11px;
+  margin-top: 3px;
+}
+.job-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 /* --- banners --- */
@@ -164,6 +266,8 @@ select {
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   min-height: 42px;
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .play {
   width: 34px;
@@ -336,6 +440,136 @@ select {
 .midi-link {
   font-size: 11px;
   color: var(--muted);
+}
+
+.track.target {
+  background: #23242a;
+  box-shadow: inset 0 0 0 1px #5b4a1c;
+}
+.badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: #5b4a1c;
+  color: #ffe8a3;
+  font-size: 10px;
+  font-weight: 500;
+}
+.params {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.param {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.param b {
+  color: var(--text);
+  font-weight: 500;
+}
+.param input {
+  accent-color: var(--accent);
+}
+.param-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.param-warn {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #ffc078;
+}
+
+/* --- 편집 바 / 선택 정보 / 상태 표시줄 --- */
+.editbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  background: #1f1c14;
+  border-bottom: 1px solid #3d3420;
+}
+.chip.save.saved {
+  color: #69db7c;
+}
+.chip.save.pending,
+.chip.save.saving {
+  color: var(--yellow);
+}
+.chip.save.error {
+  color: #ff8787;
+}
+.selbar {
+  position: absolute;
+  right: 14px;
+  bottom: 30px;
+  z-index: 5;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(12, 14, 18, 0.9);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  pointer-events: none;
+}
+.statusbar {
+  padding: 4px 14px;
+  font-size: 11px;
+  color: #5d6577;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.export {
+  position: relative;
+}
+.export summary {
+  list-style: none;
+}
+.export summary::-webkit-details-marker {
+  display: none;
+}
+.export .menu {
+  position: absolute;
+  right: 0;
+  top: 30px;
+  z-index: 10;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.export .menu a,
+.export .menu button {
+  padding: 7px 10px;
+  border-radius: 5px;
+  color: var(--text);
+  text-decoration: none;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.export .menu a:hover,
+.export .menu button:hover {
+  background: var(--panel);
+}
+.app {
+  position: relative;
 }
 
 .pianoroll {

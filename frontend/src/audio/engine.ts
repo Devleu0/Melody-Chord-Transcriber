@@ -100,11 +100,38 @@ export class AudioEngine {
     return this.rate
   }
 
+  /** 신스 트랙 노트 설정. 편집 후 재호출해도 게인(볼륨/뮤트)은 유지된다. */
   setNotes(id: string, notes: Note[]) {
-    const gain = this.ctx.createGain()
-    gain.gain.value = 0
-    gain.connect(this.master)
+    let gain = this.synth.get(id)?.gain
+    if (!gain) {
+      gain = this.ctx.createGain()
+      gain.gain.value = 0
+      gain.connect(this.master)
+    }
+    // 재생 중이어도 아직 예약 전인 구간(schedUntil 이후)부터 새 노트가 반영된다
     this.synth.set(id, { notes: [...notes].sort((a, b) => a.start - b.start), gain })
+  }
+
+  /** 파형 표시용 |샘플| 최대값 (초당 rate 개). 로드 직후의 원본 버퍼 기준 */
+  peaks(id: string, rate = 200): Float32Array | null {
+    const t = this.audio.get(id)
+    if (!t) return null
+    const buf = t.buffer
+    const size = Math.max(1, Math.floor(buf.sampleRate / rate))
+    const out = new Float32Array(Math.ceil(buf.length / size))
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const data = buf.getChannelData(c)
+      for (let i = 0; i < out.length; i++) {
+        let m = out[i]
+        const end = Math.min(data.length, (i + 1) * size)
+        for (let j = i * size; j < end; j++) {
+          const v = data[j] < 0 ? -data[j] : data[j]
+          if (v > m) m = v
+        }
+        out[i] = m
+      }
+    }
+    return out
   }
 
   setAudioGain(id: string, v: number) {
