@@ -38,7 +38,8 @@ const PEAKS_RATE = 200
 
 function loadPref<T>(key: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(`yt-amt.${key}`)
+    // 'yt-amt.' is the prefix used before the project was renamed
+    const raw = localStorage.getItem(`mct.${key}`) ?? localStorage.getItem(`yt-amt.${key}`)
     return raw === null ? fallback : (JSON.parse(raw) as T)
   } catch {
     return fallback
@@ -47,7 +48,7 @@ function loadPref<T>(key: string, fallback: T): T {
 
 function savePref(key: string, value: unknown) {
   try {
-    localStorage.setItem(`yt-amt.${key}`, JSON.stringify(value))
+    localStorage.setItem(`mct.${key}`, JSON.stringify(value))
   } catch {
     /* storage unavailable */
   }
@@ -156,6 +157,7 @@ export default function App() {
             loading: false,
             title: r.title,
             uploader: r.uploader,
+            site: r.site,
             thumbnail: r.thumbnail,
             duration: r.duration || null,
             isLive: r.is_live,
@@ -617,7 +619,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="logo">♪ yt-amt</div>
+        <div className="logo">♪ Melody Chord Transcriber</div>
         <form className="url-form" onSubmit={submit}>
           {file ? (
             <div className="file-chip" title={file.name}>

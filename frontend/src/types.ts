@@ -4,7 +4,7 @@ export interface Job {
   id: string
   url: string
   separator: Separator
-  source?: 'youtube' | 'file' // url holds the original file name for uploads
+  source?: 'url' | 'file' | 'youtube' // 'youtube' = legacy 'url'; url holds the original file name for uploads
   status: 'queued' | 'downloading' | 'separating' | 'transcribing' | 'chords' | 'finalizing' | 'done' | 'error'
   message: string
   detail?: string | null // e.g. separator name or track id being transcribed
@@ -33,7 +33,8 @@ export interface ProbeResult {
   duration: number
   thumbnail: string | null
   webpage_url: string
-  video_id: string | null
+  site: string | null // yt-dlp extractor, e.g. 'Youtube', 'Soundcloud'
+  media_key: string | null
   is_live: boolean
   duplicates: { id: string; separator: Separator; status: Job['status']; created_at: number }[]
 }

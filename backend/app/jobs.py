@@ -20,9 +20,9 @@ gpu_lock = threading.Lock()
 @dataclass
 class Job:
     id: str
-    url: str  # YouTube URL, or the original file name for uploads
+    url: str  # media URL (any site yt-dlp supports), or the original file name for uploads
     separator: str
-    source: str = "youtube"  # "youtube" | "file"
+    source: str = "url"  # "url" | "file" (jobs saved before the rename say "youtube")
     status: str = "queued"
     message: str = "Queued"
     detail: str | None = None
@@ -73,7 +73,7 @@ class JobManager:
         self.enqueue(job)
         return job
 
-    def create(self, url: str, separator: str, source: str = "youtube") -> Job:
+    def create(self, url: str, separator: str, source: str = "url") -> Job:
         """Register a job without queueing it (uploads write their file first)."""
         job = Job(id=uuid.uuid4().hex[:12], url=url, separator=separator, source=source)
         job.save()
@@ -129,7 +129,7 @@ class JobManager:
             upload = next(job.dir.glob("upload.*"))
             job.meta = import_audio(upload, job.dir, title=Path(job.url).stem)
         else:
-            self._update(job, "downloading", "Downloading YouTube audio", 0.05)
+            self._update(job, "downloading", "Downloading audio", 0.05)
             job.meta = download_audio(job.url, job.dir)
         source = job.dir / "source.wav"
 

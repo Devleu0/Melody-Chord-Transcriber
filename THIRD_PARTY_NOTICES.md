@@ -1,6 +1,6 @@
 # Third-party notices
 
-yt-amt itself is MIT-licensed (see [LICENSE](LICENSE)). It builds on the work below.
+Melody Chord Transcriber itself is MIT-licensed (see [LICENSE](LICENSE)). It builds on the work below.
 
 ## Code included in this repository
 

@@ -21,7 +21,7 @@ from .config import (
 )
 from .jobs import JobManager
 
-app = FastAPI(title="yt-amt")
+app = FastAPI(title="Melody Chord Transcriber")
 manager = JobManager()
 
 
@@ -94,23 +94,29 @@ def info():
     }
 
 
-def _duplicates(video_id: str | None) -> list[dict]:
-    """Earlier jobs for the same YouTube video (finished or still running)."""
-    from .pipeline.download import youtube_id
+def _job_media_key(job) -> str | None:
+    from .pipeline.download import legacy_media_key
 
-    if not video_id:
+    meta = job.meta or {}
+    if meta.get("media_key"):
+        return meta["media_key"]
+    if meta.get("video_id"):  # jobs from before media_key was introduced
+        return f"Youtube:{meta['video_id']}"
+    return legacy_media_key(job.url) if job.source != "file" else None
+
+
+def _duplicates(key: str | None) -> list[dict]:
+    """Earlier jobs for the same media item on the same site (finished or still running)."""
+    if not key:
         return []
-    found = [
-        j for j in manager.jobs.values()
-        if j.status != "error" and (j.meta.get("video_id") or youtube_id(j.url)) == video_id
-    ]
+    found = [j for j in manager.jobs.values() if j.status != "error" and _job_media_key(j) == key]
     found.sort(key=lambda j: j.created_at, reverse=True)
     return [{"id": j.id, "separator": j.separator, "status": j.status, "created_at": j.created_at} for j in found]
 
 
 @app.post("/api/probe")
 def probe_url(req: ProbeRequest):
-    """Fetch title / duration / thumbnail without downloading, plus earlier jobs for the same video."""
+    """Fetch title / duration / thumbnail without downloading, plus earlier jobs for the same media."""
     from .pipeline.download import DownloadError, probe
 
     if not req.url.startswith(("http://", "https://")):
@@ -119,12 +125,12 @@ def probe_url(req: ProbeRequest):
         meta = probe(req.url)
     except DownloadError as e:
         raise HTTPException(422, str(e))
-    return {**meta, "duplicates": _duplicates(meta["video_id"])}
+    return {**meta, "duplicates": _duplicates(meta["media_key"])}
 
 
 @app.post("/api/jobs/upload")
 async def upload_job(file: UploadFile, separator: Literal["roformer", "demucs"] = Form("roformer")):
-    """Start a job from a local audio (or video) file instead of a YouTube link."""
+    """Start a job from a local audio (or video) file instead of a link."""
     name = Path(file.filename or "audio").name
     ext = Path(name).suffix.lower()
     if ext not in UPLOAD_EXTS:

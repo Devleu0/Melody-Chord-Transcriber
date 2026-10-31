@@ -12,21 +12,21 @@ UV="python3 -m uv"
 if command -v uv >/dev/null 2>&1; then UV="uv"; fi
 
 if [ ! -x backend/.venv/bin/python ]; then
-  echo "[yt-amt] Installing backend dependencies (first run, takes a few minutes)..."
+  echo "[melody-chord-transcriber] Installing backend dependencies (first run, takes a few minutes)..."
   $UV --version >/dev/null 2>&1 || python3 -m pip install --user uv
   (cd backend && $UV sync --python 3.11)
 fi
 if [ ! -d frontend/node_modules ]; then
-  echo "[yt-amt] Installing frontend dependencies..."
+  echo "[melody-chord-transcriber] Installing frontend dependencies..."
   (cd frontend && npm install)
 fi
 
 cleanup() { kill 0 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
-echo "[yt-amt] Starting backend  (http://localhost:8000)"
+echo "[melody-chord-transcriber] Starting backend  (http://localhost:8000)"
 (cd backend && .venv/bin/python -m uvicorn app.main:app --port 8000) &
-echo "[yt-amt] Starting frontend (http://localhost:5173)"
+echo "[melody-chord-transcriber] Starting frontend (http://localhost:5173)"
 (cd frontend && npm run dev -- --strictPort) &
 
 # Wait for the dev server, then open the browser
@@ -38,5 +38,5 @@ if command -v open >/dev/null 2>&1; then open http://localhost:5173
 elif command -v xdg-open >/dev/null 2>&1; then xdg-open http://localhost:5173 >/dev/null 2>&1 || true
 fi
 
-echo "[yt-amt] Running. Press Ctrl+C to stop both servers."
+echo "[melody-chord-transcriber] Running. Press Ctrl+C to stop both servers."
 wait

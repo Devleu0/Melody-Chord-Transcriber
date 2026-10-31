@@ -1,8 +1,8 @@
 <div align="center">
 
-# yt-amt
+# Melody Chord Transcriber
 
-**YouTube 링크를 넣으면 멜로디와 코드 진행이 DAW 스타일 피아노롤에 채보됩니다.**
+**음악 링크나 오디오 파일을 넣으면 멜로디와 코드 진행이 DAW 스타일 피아노롤에 채보됩니다.**
 
 [English](README.md) · 한국어
 
@@ -15,7 +15,7 @@
 
 </div>
 
-yt-amt는 로컬에서 동작하는 **자동 채보(AMT)** 웹 앱입니다. YouTube 링크나 내 컴퓨터의 오디오 파일을 받아 보컬과 반주를 분리하고, 보컬 멜로디·반주·코드 진행을 채보한 뒤 피아노롤에 보여 줍니다. 피아노롤에서는 재생, 구간 반복, 느리게 듣기, 편집, 내보내기를 할 수 있습니다.
+Melody Chord Transcriber는 로컬에서 동작하는 **자동 채보(AMT)** 웹 앱입니다. [yt-dlp](https://github.com/yt-dlp/yt-dlp)가 지원하는 사이트(YouTube, SoundCloud, Bandcamp, Vimeo 외 [1,000곳 이상](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md))의 링크나 내 컴퓨터의 오디오 파일을 받아 보컬과 반주를 분리하고, 보컬 멜로디·반주·코드 진행을 채보한 뒤 피아노롤에 보여 줍니다. 피아노롤에서는 재생, 구간 반복, 느리게 듣기, 편집, 내보내기를 할 수 있습니다.
 
 모든 처리는 내 컴퓨터에서 이루어집니다. GPU는 4GB면 충분하고, GPU가 없어도(CPU만으로도) 느리지만 동작합니다.
 
@@ -23,7 +23,7 @@ yt-amt는 로컬에서 동작하는 **자동 채보(AMT)** 웹 앱입니다. You
 
 ## 기능
 
-- **입력**: YouTube 링크, 또는 로컬 오디오·동영상 파일(MP3, WAV, FLAC, M4A, OGG, Opus, MP4 등). 📎 버튼으로 고르거나 페이지 아무 곳에나 끌어다 놓으면 됩니다.
+- **입력**: yt-dlp가 지원하는 사이트의 링크, 또는 로컬 오디오·동영상 파일(MP3, WAV, FLAC, M4A, OGG, Opus, MP4 등). 📎 버튼으로 고르거나 페이지 아무 곳에나 끌어다 놓으면 됩니다.
 - **음원 분리**: Mel-Band RoFormer(보컬/반주) 또는 Demucs `htdemucs_ft`(보컬/베이스/기타/드럼)
 - **보컬 멜로디**: RMVPE 피치 추적 후 노트로 분할합니다. 비브라토와 같은 음 반복도 처리하고, 연속 피치 곡선을 노트 위에 함께 그립니다.
 - **반주**: Spotify Basic Pitch 다성 채보
@@ -42,7 +42,7 @@ yt-amt는 로컬에서 동작하는 **자동 채보(AMT)** 웹 앱입니다. You
 
 ```mermaid
 flowchart LR
-  A[YouTube URL] -->|yt-dlp + ffmpeg| B[source.wav]
+  A["미디어 URL<br/>(YouTube, SoundCloud 등)"] -->|yt-dlp + ffmpeg| B[source.wav]
   U[오디오 파일] -->|업로드 + ffmpeg| B
   B -->|audio-separator<br/>Mel-RoFormer / Demucs| C[vocals.wav]
   B --> D[accompaniment.wav]
@@ -61,8 +61,8 @@ flowchart LR
 **필요한 것:** Python 3.9 이상([uv](https://github.com/astral-sh/uv) 설치에만 쓰이고, Python 3.11 환경은 uv가 만듭니다), Node.js 18 이상, `PATH`에 등록된 [ffmpeg](https://ffmpeg.org/download.html). CUDA 12 드라이버가 설치된 NVIDIA GPU는 선택이지만 권장합니다.
 
 ```bash
-git clone https://github.com/Devleu0/yt-amt.git
-cd yt-amt
+git clone https://github.com/Devleu0/melody-chord-transcriber.git
+cd melody-chord-transcriber
 ```
 
 | OS | 실행 |
@@ -95,14 +95,14 @@ npm run dev                        # http://localhost:5173
 
 ## 사용법
 
-1. YouTube 링크를 붙여넣거나, 📎로 오디오 파일을 고르거나 페이지에 끌어다 놓습니다. 내려받거나 올리기 전에 미리보기 카드가 제목, 길이, 대략적인 예상 처리 시간을 보여 줍니다. **RoFormer**(보컬/반주) 또는 **Demucs**(4분리)를 고른 뒤 **채보 시작**을 누릅니다.
+1. 음악 링크를 붙여넣거나, 📎로 오디오 파일을 고르거나 페이지에 끌어다 놓습니다. 내려받거나 올리기 전에 미리보기 카드가 제목, 길이, 대략적인 예상 처리 시간을 보여 줍니다. **RoFormer**(보컬/반주) 또는 **Demucs**(4분리)를 고른 뒤 **채보 시작**을 누릅니다.
 
    | 입력 검사 | 결과 |
    |---|---|
    | 10초 미만, 15분 초과, 300MB 초과 파일, 라이브 스트림, 재생목록 전용 링크 | 차단 |
    | 8~15분 | 경고 (오래 걸리고 GPU 메모리가 부족할 수 있음) |
-   | YouTube가 아닌 링크 | 경고 (yt-dlp가 지원하는 다른 사이트는 테스트되지 않음) |
-   | 이미 처리한 영상 | 기존 결과 열기 제안 |
+   | YouTube 외 사이트 링크 | 안내 (yt-dlp로 처리, YouTube보다 테스트가 적음) |
+   | 이미 처리한 곡 (같은 사이트 + 미디어 ID) | 기존 결과 열기 제안 |
 
    제한값은 `backend/app/config.py`에 있고, 서버에서도 같은 기준으로 다시 검사합니다.
 2. 처리가 끝나면 **Space**로 재생합니다. 원곡을 음소거하고 트랙의 **신스**를 켜면 채보 결과를 들을 수 있습니다.
@@ -127,9 +127,9 @@ npm run dev                        # http://localhost:5173
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| `POST` | `/api/jobs` | `{url, separator: "roformer" \| "demucs"}` → 작업 |
+| `POST` | `/api/jobs` | `{url, separator: "roformer" \| "demucs"}` → 작업 (yt-dlp 지원 URL) |
 | `POST` | `/api/jobs/upload` | multipart `file` + `separator` → 작업 |
-| `POST` | `/api/probe` | `{url}` → 제목, 길이, 썸네일, 같은 영상의 이전 작업 (다운로드 없음) |
+| `POST` | `/api/probe` | `{url}` → 제목, 길이, 썸네일, 사이트, 같은 곡의 이전 작업 (다운로드 없음) |
 | `GET` | `/api/info` | 장치(CUDA/CPU)와 입력 제한값 |
 | `GET` | `/api/jobs`, `/api/jobs/{id}` | 목록 / 상태 |
 | `DELETE` | `/api/jobs/{id}` | 끝난 작업과 파일 삭제 |
@@ -145,14 +145,14 @@ npm run dev                        # http://localhost:5173
 
 ## 문제 해결
 
-- **다운로드 중 "Sign in to confirm"이나 JS 챌린지 오류가 날 때**: yt-dlp를 업데이트하세요(`cd backend && python -m uv lock --upgrade-package yt-dlp && python -m uv sync`). yt-dlp는 YouTube의 JS 챌린지를 풀 때 Deno를 쓰고, 없으면 Node를 씁니다.
+- **다운로드 실패 ("Sign in to confirm", JS 챌린지, 사이트 구조 변경 등)**: yt-dlp를 업데이트하세요(`cd backend && python -m uv lock --upgrade-package yt-dlp && python -m uv sync`). yt-dlp는 YouTube의 JS 챌린지를 풀 때 Deno를 쓰고, 없으면 Node를 씁니다.
 - **CUDA 메모리 부족**: 더 짧은 곡을 쓰거나(최대 15분, `backend/app/config.py`의 `MAX_DURATION_SEC`), GPU를 쓰는 다른 프로그램을 종료하세요.
 - **소리가 안 날 때**: 브라우저는 사용자가 페이지를 조작하기 전까지 오디오를 막습니다. 재생 버튼을 한 번 누르고, 🔊 마스터 볼륨과 M(음소거) 버튼을 확인하세요.
 - **코드가 너무 자주 바뀌거나 반대로 둔할 때**: 코드 트랙의 ⚙에서 *코드 변경 억제* 값을 조절하세요.
 
 ## 주의 사항
 
-이 프로젝트는 개인 학습·연구·연습용입니다. 권리가 없는 YouTube 콘텐츠를 내려받는 것은 YouTube [서비스 약관](https://www.youtube.com/t/terms)에 어긋날 수 있습니다. 저작권을 존중하고, 저작권이 있는 곡의 채보 결과를 허락 없이 배포하지 마세요. 채보는 자동으로 만들어지므로 틀린 부분이 있습니다.
+이 프로젝트는 개인 학습·연구·연습용입니다. 권리가 없는 콘텐츠를 YouTube 등에서 내려받는 것은 각 사이트의 약관(예: YouTube [서비스 약관](https://www.youtube.com/t/terms))에 어긋날 수 있습니다. 저작권을 존중하고, 저작권이 있는 곡의 채보 결과를 허락 없이 배포하지 마세요. 채보는 자동으로 만들어지므로 틀린 부분이 있습니다.
 
 ## 감사의 말
 

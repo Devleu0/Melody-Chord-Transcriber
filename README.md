@@ -1,8 +1,8 @@
 <div align="center">
 
-# yt-amt
+# Melody Chord Transcriber
 
-**Paste a YouTube link, get the melody and chords on a DAW-style piano roll.**
+**Paste a music link or drop an audio file, get the melody and chords on a DAW-style piano roll.**
 
 English · [한국어](README.ko.md)
 
@@ -15,7 +15,7 @@ English · [한국어](README.ko.md)
 
 </div>
 
-yt-amt is a local web app for **automatic music transcription (AMT)**. It takes a YouTube link or a local audio file, separates vocals from the accompaniment, transcribes the vocal melody, the accompaniment and the chord progression, and shows everything on a piano roll you can play, loop, slow down, edit and export.
+Melody Chord Transcriber is a local web app for **automatic music transcription (AMT)**. It takes a link from any site [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports (YouTube, SoundCloud, Bandcamp, Vimeo and [1,000+ more](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)) or a local audio file, separates vocals from the accompaniment, transcribes the vocal melody, the accompaniment and the chord progression, and shows everything on a piano roll you can play, loop, slow down, edit and export.
 
 Everything runs on your machine. A 4 GB GPU is enough; CPU-only also works, just slower.
 
@@ -23,7 +23,7 @@ Everything runs on your machine. A 4 GB GPU is enough; CPU-only also works, just
 
 ## Features
 
-- **Input**: a YouTube link, or a local audio/video file (MP3, WAV, FLAC, M4A, OGG, Opus, MP4, …) picked with 📎 or dropped anywhere on the page.
+- **Input**: a link from any site yt-dlp supports, or a local audio/video file (MP3, WAV, FLAC, M4A, OGG, Opus, MP4, …) picked with 📎 or dropped anywhere on the page.
 - **Source separation**: Mel-Band RoFormer (vocals / accompaniment) or Demucs `htdemucs_ft` (vocals / bass / other / drums).
 - **Vocal melody**: RMVPE pitch tracking, then note segmentation that handles vibrato and repeated notes. The continuous pitch curve is drawn over the notes.
 - **Accompaniment**: polyphonic transcription with Spotify's Basic Pitch.
@@ -42,7 +42,7 @@ Everything runs on your machine. A 4 GB GPU is enough; CPU-only also works, just
 
 ```mermaid
 flowchart LR
-  A[YouTube URL] -->|yt-dlp + ffmpeg| B[source.wav]
+  A["Media URL<br/>(YouTube, SoundCloud, …)"] -->|yt-dlp + ffmpeg| B[source.wav]
   U[Audio file] -->|upload + ffmpeg| B
   B -->|audio-separator<br/>Mel-RoFormer / Demucs| C[vocals.wav]
   B --> D[accompaniment.wav]
@@ -61,8 +61,8 @@ The backend is FastAPI with a single GPU worker queue. The frontend is React + T
 **Requirements:** Python 3.9+ (only used to install [uv](https://github.com/astral-sh/uv), which then sets up Python 3.11), Node.js 18+, [ffmpeg](https://ffmpeg.org/download.html) on `PATH`. An NVIDIA GPU with CUDA 12 drivers is optional but recommended.
 
 ```bash
-git clone https://github.com/Devleu0/yt-amt.git
-cd yt-amt
+git clone https://github.com/Devleu0/melody-chord-transcriber.git
+cd melody-chord-transcriber
 ```
 
 | OS | Run |
@@ -95,14 +95,14 @@ npm run dev                        # http://localhost:5173
 
 ## Usage
 
-1. Paste a YouTube link, or pick an audio file with 📎 (or drag it onto the page). A preview card shows the title, length and a rough processing-time estimate before anything is downloaded or uploaded. Choose **RoFormer** (vocals + accompaniment) or **Demucs** (4 stems), and press **Transcribe**.
+1. Paste a music link, or pick an audio file with 📎 (or drag it onto the page). A preview card shows the title, length and a rough processing-time estimate before anything is downloaded or uploaded. Choose **RoFormer** (vocals + accompaniment) or **Demucs** (4 stems), and press **Transcribe**.
 
    | Input check | Result |
    |---|---|
    | shorter than 10 s, longer than 15 min, file over 300 MB, live stream, playlist-only link | blocked |
    | 8–15 min | warning (slow, may run out of GPU memory) |
-   | non-YouTube link | warning (other yt-dlp sites are untested) |
-   | video already transcribed | offers to open the existing result |
+   | link to a site other than YouTube | note: handled by yt-dlp, less tested than YouTube |
+   | same track already transcribed (same site + media id) | offers to open the existing result |
 
    The limits live in `backend/app/config.py`, and the server enforces them as well.
 2. When it finishes, press **Space** to play. Mute the mix and turn on a track's **Synth** to hear the transcription.
@@ -129,9 +129,9 @@ npm run dev                        # http://localhost:5173
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/jobs` | `{url, separator: "roformer" \| "demucs"}` → job |
+| `POST` | `/api/jobs` | `{url, separator: "roformer" \| "demucs"}` → job (any yt-dlp URL) |
 | `POST` | `/api/jobs/upload` | multipart `file` + `separator` → job |
-| `POST` | `/api/probe` | `{url}` → title, duration, thumbnail, earlier jobs for the same video (no download) |
+| `POST` | `/api/probe` | `{url}` → title, duration, thumbnail, site, earlier jobs for the same media (no download) |
 | `GET` | `/api/info` | device (CUDA/CPU) and input limits |
 | `GET` | `/api/jobs`, `/api/jobs/{id}` | list / status |
 | `DELETE` | `/api/jobs/{id}` | delete a finished job and its files |
@@ -163,14 +163,14 @@ frontend/src/
 
 ## Troubleshooting
 
-- **Download fails with "Sign in to confirm" or a JS challenge error**: update yt-dlp (`cd backend && python -m uv lock --upgrade-package yt-dlp && python -m uv sync`). yt-dlp uses Deno, or Node as a fallback, to solve YouTube's JS challenges.
+- **Download fails ("Sign in to confirm", JS challenge, or a site changed its layout)**: update yt-dlp (`cd backend && python -m uv lock --upgrade-package yt-dlp && python -m uv sync`). yt-dlp uses Deno, or Node as a fallback, to solve YouTube's JS challenges.
 - **CUDA out of memory**: use shorter songs (the limit is 15 minutes, set by `MAX_DURATION_SEC` in `backend/app/config.py`), or close other GPU applications.
 - **No sound**: the browser blocks audio until you interact with the page, so press Play once. Check the 🔊 master volume and the mute (M) buttons.
 - **Chords look busy or sluggish**: open ⚙ on the Chords track and change the *chord change penalty*.
 
 ## Disclaimer
 
-This project is for personal study, research and practice. Downloading content from YouTube may violate its [Terms of Service](https://www.youtube.com/t/terms) unless you have the right to do so. Respect copyright, and do not redistribute transcriptions of copyrighted music without permission. Transcriptions are automatic and will contain mistakes.
+This project is for personal study, research and practice. Downloading content from YouTube or other sites may violate their terms of service (for example YouTube's [Terms of Service](https://www.youtube.com/t/terms)) unless you have the right to do so. Respect copyright, and do not redistribute transcriptions of copyrighted music without permission. Transcriptions are automatic and will contain mistakes.
 
 ## Acknowledgements
 

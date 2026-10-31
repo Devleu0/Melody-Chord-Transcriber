@@ -2,7 +2,7 @@
 
 [한국어](#기여-가이드) · English
 
-Thanks for your interest in yt-amt! Bug reports, ideas and pull requests are all welcome.
+Thanks for your interest in Melody Chord Transcriber! Bug reports, ideas and pull requests are all welcome.
 
 ## Development setup
 
@@ -32,13 +32,13 @@ npm run dev   # http://localhost:5173, proxies /api and /files to :8000
 ## Reporting bugs
 
 Use the issue template. Please include OS, GPU / VRAM, the separator you used, and the backend log around the error.
-Do **not** attach copyrighted audio; a public YouTube link is enough.
+Do **not** attach copyrighted audio; a public link is enough.
 
 ---
 
 # 기여 가이드
 
-yt-amt에 관심 가져 주셔서 감사합니다! 버그 제보, 아이디어, PR 모두 환영합니다.
+Melody Chord Transcriber에 관심 가져 주셔서 감사합니다! 버그 제보, 아이디어, PR 모두 환영합니다.
 
 ## 개발 환경
 
@@ -56,4 +56,4 @@ yt-amt에 관심 가져 주셔서 감사합니다! 버그 제보, 아이디어, 
 ## 버그 제보
 
 이슈 템플릿을 사용해 주세요. OS, GPU/VRAM, 사용한 분리 엔진, 오류 전후의 백엔드 로그를 함께 적어 주시면 좋습니다.
-저작권이 있는 오디오 파일은 첨부하지 말고 공개 YouTube 링크만 적어 주세요.
+저작권이 있는 오디오 파일은 첨부하지 말고 공개된 링크만 적어 주세요.

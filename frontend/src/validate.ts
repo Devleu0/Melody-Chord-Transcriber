@@ -68,6 +68,7 @@ export interface Preview {
   error?: string | null
   title?: string | null
   uploader?: string | null
+  site?: string | null
   thumbnail?: string | null
   duration: number | null
   size?: number
@@ -82,7 +83,7 @@ export function assess(p: Preview, info: ServerInfo | null, separator: Separator
   const msgs: { level: Level; text: string }[] = []
   if (p.kind === 'url') {
     if (p.urlKind === 'invalid') msgs.push({ level: 'error', text: t('pv.invalidUrl') })
-    if (p.urlKind === 'other') msgs.push({ level: 'warn', text: t('pv.notYoutube') })
+    if (p.urlKind === 'other' && !p.loading && !p.error) msgs.push({ level: 'info', text: t('pv.otherSite', { site: p.site ?? '?' }) })
     if (p.urlKind === 'youtube-playlist' && !p.error) msgs.push({ level: 'info', text: t('pv.playlist') })
     if (p.error) msgs.push({ level: 'error', text: t('pv.error', { e: p.error }) })
     if (p.isLive) msgs.push({ level: 'error', text: t('pv.live') })

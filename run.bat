@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-echo [yt-amt] Preparing to start...
+echo [melody-chord-transcriber] Preparing to start...
 
 rem --- Check required tools ---
 where python >nul 2>nul || (echo [ERROR] python is not on PATH. & pause & exit /b 1)
@@ -11,25 +11,25 @@ where ffmpeg >nul 2>nul || (echo [ERROR] ffmpeg is not on PATH. & pause & exit /
 
 rem --- Install dependencies on first run ---
 if not exist "backend\.venv\Scripts\python.exe" (
-    echo [yt-amt] Installing backend dependencies ^(first run only, takes a few minutes^)...
+    echo [melody-chord-transcriber] Installing backend dependencies ^(first run only, takes a few minutes^)...
     python -m uv --version >nul 2>nul || python -m pip install --user uv || goto :fail
     pushd backend
     python -m uv sync --python 3.11 || (popd & goto :fail)
     popd
 )
 if not exist "frontend\node_modules" (
-    echo [yt-amt] Installing frontend dependencies...
+    echo [melody-chord-transcriber] Installing frontend dependencies...
     pushd frontend
     call npm install || (popd & goto :fail)
     popd
 )
 
 rem --- Start servers (each in its own window) ---
-echo [yt-amt] Starting backend (http://localhost:8000)
-start "yt-amt backend" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000"
+echo [melody-chord-transcriber] Starting backend (http://localhost:8000)
+start "mct backend" cmd /k "cd /d "%~dp0backend" && .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000"
 
-echo [yt-amt] Starting frontend (http://localhost:5173)
-start "yt-amt frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
+echo [melody-chord-transcriber] Starting frontend (http://localhost:5173)
+start "mct frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 
 rem --- Wait for the frontend to come up, then open the browser ---
 set /a tries=0
@@ -40,7 +40,7 @@ powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing http://
 if errorlevel 1 if %tries% lss 30 goto :wait
 
 start "" http://localhost:5173
-echo [yt-amt] Started. Close the two server windows to stop.
+echo [melody-chord-transcriber] Started. Close the two server windows to stop.
 timeout /t 3 >nul
 exit /b 0
 

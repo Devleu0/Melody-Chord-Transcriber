@@ -1,7 +1,7 @@
 [project]
-name = "yt-amt-backend"
+name = "melody-chord-transcriber-backend"
 version = "0.1.0"
-description = "YouTube audio -> stem separation -> melody & chord transcription API"
+description = "Audio (any yt-dlp URL or local file) -> stem separation -> melody & chord transcription API"
 license = "MIT"
 requires-python = ">=3.11,<3.12"
 dependencies = [

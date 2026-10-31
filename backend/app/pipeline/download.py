@@ -13,10 +13,43 @@ log = logging.getLogger(__name__)
 # 11-character YouTube video id in watch / youtu.be / shorts / embed / live URLs
 _YT_ID = re.compile(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})")
 
+_COMMON = {
+    "quiet": True,
+    "no_warnings": True,
+    "noplaylist": True,
+    "socket_timeout": 15,
+    # YouTube needs a JS runtime for its challenges; use deno if installed, otherwise node
+    "js_runtimes": {"deno": {}, "node": {}},
+}
 
-def youtube_id(url: str) -> str | None:
+
+class DownloadError(Exception):
+    pass
+
+
+def media_key(info: dict) -> str | None:
+    """Site-independent identity of a media item ("Youtube:dQw4w9WgXcQ", "Soundcloud:123", ...)."""
+    if info.get("extractor_key") and info.get("id"):
+        return f"{info['extractor_key']}:{info['id']}"
+    return None
+
+
+def legacy_media_key(url: str) -> str | None:
+    """Key for jobs saved before media_key existed (only YouTube links can be recovered from the URL)."""
     m = _YT_ID.search(url or "")
-    return m.group(1) if m else None
+    return f"Youtube:{m.group(1)}" if m else None
+
+
+def _meta(info: dict, url: str) -> dict:
+    return {
+        "title": info.get("title"),
+        "uploader": info.get("uploader"),
+        "duration": info.get("duration") or 0,
+        "thumbnail": info.get("thumbnail"),
+        "webpage_url": info.get("webpage_url", url),
+        "site": info.get("extractor_key"),
+        "media_key": media_key(info),
+    }
 
 
 def _check_duration(duration: float, what: str) -> None:
@@ -24,16 +57,6 @@ def _check_duration(duration: float, what: str) -> None:
         raise DownloadError(f"{what} is too short ({duration:.0f} s). Min {MIN_DURATION_SEC} s")
     if duration > MAX_DURATION_SEC:
         raise DownloadError(f"{what} is too long ({int(duration) // 60} min). Max {MAX_DURATION_SEC // 60} min")
-
-
-_COMMON = {
-    "quiet": True,
-    "no_warnings": True,
-    "noplaylist": True,
-    "socket_timeout": 15,
-    # Recent YouTube requires solving a JS challenge. Fall back to installed node if deno is missing
-    "js_runtimes": {"deno": {}, "node": {}},
-}
 
 
 def probe(url: str) -> dict:
@@ -45,30 +68,19 @@ def probe(url: str) -> dict:
     except yt_dlp.utils.DownloadError as e:
         raise DownloadError(str(e).removeprefix("ERROR: ")) from e
     if info.get("_type") == "playlist":
-        raise DownloadError("This is a playlist link. Paste the link of a single video")
-    return {
-        "title": info.get("title"),
-        "uploader": info.get("uploader"),
-        "duration": info.get("duration") or 0,
-        "thumbnail": info.get("thumbnail"),
-        "webpage_url": info.get("webpage_url", url),
-        "video_id": info.get("id") if info.get("extractor_key") == "Youtube" else None,
-        "is_live": bool(info.get("is_live")),
-    }
-
-class DownloadError(Exception):
-    pass
+        raise DownloadError("This is a playlist link. Paste the link of a single track or video")
+    return {**_meta(info, url), "is_live": bool(info.get("is_live"))}
 
 
 def download_audio(url: str, out_dir: Path) -> dict:
-    """Download only the audio from a YouTube URL and save it as out_dir/source.wav."""
+    """Download only the audio from any yt-dlp supported URL and save it as out_dir/source.wav."""
     out_dir.mkdir(parents=True, exist_ok=True)
     with yt_dlp.YoutubeDL(_COMMON) as ydl:
         info = ydl.extract_info(url, download=False)
     if info.get("is_live"):
         raise DownloadError("Live streams are not supported")
     duration = info.get("duration") or 0
-    _check_duration(duration, "Video")
+    _check_duration(duration, "Media")
 
     opts = {
         **_COMMON,
@@ -86,14 +98,7 @@ def download_audio(url: str, out_dir: Path) -> dict:
     wav = out_dir / "source.wav"
     if not wav.exists():
         raise DownloadError("Audio extraction failed (check ffmpeg)")
-    return {
-        "title": info.get("title"),
-        "uploader": info.get("uploader"),
-        "duration": duration,
-        "thumbnail": info.get("thumbnail"),
-        "webpage_url": info.get("webpage_url", url),
-        "video_id": info.get("id") if info.get("extractor_key") == "Youtube" else None,
-    }
+    return {**_meta(info, url), "duration": duration}
 
 
 def import_audio(src: Path, out_dir: Path, title: str) -> dict:

@@ -17,6 +17,7 @@ export function InputPreview({ preview: p, info, separator, onOpenJob }: Props) 
   const { msgs } = assess(p, info, separator, t)
   const dups = p.duplicates ?? []
   const meta = [
+    p.site && p.site !== 'Generic' ? p.site : null,
     p.uploader,
     p.duration ? `${t('pv.length')} ${fmtTime(p.duration)}` : null,
     p.size != null ? `${(p.size / 1024 / 1024).toFixed(1)} MB` : null,

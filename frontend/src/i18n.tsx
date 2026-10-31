@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 export type Lang = 'ko' | 'en'
 
 const ko = {
-  'app.placeholder': 'YouTube 링크를 붙여넣거나 오디오 파일을 끌어다 놓으세요',
+  'app.placeholder': '음악 링크(YouTube, SoundCloud 등)를 붙여넣거나 오디오 파일을 끌어다 놓으세요',
   'app.file.pick': '오디오 파일 선택',
   'app.file.remove': '파일 선택 취소',
   'app.drop': '여기에 오디오 파일을 놓으세요',
@@ -14,7 +14,7 @@ const ko = {
   'pv.loading': '링크 확인 중…',
   'pv.length': '길이',
   'pv.invalidUrl': 'http:// 또는 https:// 로 시작하는 링크를 넣어 주세요',
-  'pv.notYoutube': 'YouTube 링크가 아닙니다. yt-dlp가 지원하는 다른 사이트는 동작할 수도 있지만 테스트되지 않았습니다.',
+  'pv.otherSite': '{site} 링크입니다. yt-dlp로 받아 처리합니다 (YouTube 외 사이트는 테스트가 적습니다).',
   'pv.playlist': '재생목록 링크입니다. 이 영상 하나만 처리합니다.',
   'pv.error': '링크를 확인할 수 없습니다: {e}',
   'pv.live': '라이브 스트림은 처리할 수 없습니다',
@@ -36,7 +36,7 @@ const ko = {
   'app.start': '채보 시작',
   'app.history': '작업 기록',
   'app.dismiss': '클릭해서 닫기',
-  'app.empty.1': 'YouTube 링크를 넣거나 오디오 파일(📎 또는 끌어다 놓기)을 고르고, 분리 엔진을 선택한 뒤 <b>채보 시작</b>을 누르세요.',
+  'app.empty.1': '음악 링크(yt-dlp 지원 사이트)를 넣거나 오디오 파일(📎 또는 끌어다 놓기)을 고르고, 분리 엔진을 선택한 뒤 <b>채보 시작</b>을 누르세요.',
   'app.empty.2': 'RoFormer: 보컬/반주 2트랙 · Demucs: 보컬/베이스/기타/드럼 4트랙 · 코드 진행은 자동 분석',
   'app.empty.open': '이전 작업 열기',
   'app.shortcuts':
@@ -51,7 +51,7 @@ const ko = {
   'stage.done': '완료',
   'stage.error': '오류',
   'msg.queued': '대기 중',
-  'msg.downloading': 'YouTube 오디오 다운로드 중',
+  'msg.downloading': '오디오 다운로드 중',
   'msg.separating': '음원 분리 중 ({detail})',
   'msg.transcribing': '채보 중: {detail}',
   'msg.chords': '비트 / 코드 진행 분석 중',
@@ -158,7 +158,7 @@ const ko = {
 type Dict = Record<keyof typeof ko, string>
 
 const en: Dict = {
-  'app.placeholder': 'Paste a YouTube link or drop an audio file',
+  'app.placeholder': 'Paste a music link (YouTube, SoundCloud, …) or drop an audio file',
   'app.file.pick': 'Choose an audio file',
   'app.file.remove': 'Remove file',
   'app.drop': 'Drop an audio file here',
@@ -169,7 +169,7 @@ const en: Dict = {
   'pv.loading': 'Checking the link…',
   'pv.length': 'length',
   'pv.invalidUrl': 'Enter a link that starts with http:// or https://',
-  'pv.notYoutube': 'Not a YouTube link. Other sites supported by yt-dlp may work but are untested.',
+  'pv.otherSite': '{site} link: downloaded with yt-dlp (sites other than YouTube are less tested).',
   'pv.playlist': 'Playlist link: only this video will be processed.',
   'pv.error': 'Could not check the link: {e}',
   'pv.live': 'Live streams are not supported',
@@ -191,7 +191,7 @@ const en: Dict = {
   'app.start': 'Transcribe',
   'app.history': 'History',
   'app.dismiss': 'Click to dismiss',
-  'app.empty.1': 'Paste a YouTube link or pick an audio file (📎 or drag and drop), choose a separation engine and press <b>Transcribe</b>.',
+  'app.empty.1': 'Paste a music link (any site yt-dlp supports) or pick an audio file (📎 or drag and drop), choose a separation engine and press <b>Transcribe</b>.',
   'app.empty.2': 'RoFormer: vocals + accompaniment · Demucs: vocals/bass/other/drums · chords are analyzed automatically',
   'app.empty.open': 'Open a previous job',
   'app.shortcuts':
@@ -206,7 +206,7 @@ const en: Dict = {
   'stage.done': 'Done',
   'stage.error': 'Error',
   'msg.queued': 'Waiting in queue',
-  'msg.downloading': 'Downloading audio from YouTube',
+  'msg.downloading': 'Downloading audio',
   'msg.separating': 'Separating stems ({detail})',
   'msg.transcribing': 'Transcribing: {detail}',
   'msg.chords': 'Analyzing beats and chord progression',
@@ -316,7 +316,7 @@ export type TFn = (key: MsgKey, vars?: Record<string, string | number>) => strin
 
 function detectLang(): Lang {
   try {
-    const saved = localStorage.getItem('yt-amt.lang')
+    const saved = localStorage.getItem('mct.lang') ?? localStorage.getItem('yt-amt.lang') // old prefix before the rename
     if (saved === 'ko' || saved === 'en') return saved
   } catch {
     /* storage unavailable */
@@ -331,7 +331,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const setLang = useCallback((l: Lang) => {
     setLangState(l)
     try {
-      localStorage.setItem('yt-amt.lang', l)
+      localStorage.setItem('mct.lang', l)
     } catch {
       /* storage unavailable */
     }
