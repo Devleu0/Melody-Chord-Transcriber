@@ -695,6 +695,265 @@ select {
   position: relative;
 }
 
+/* --- view switch / transpose / capo --- */
+.seg.views button {
+  padding: 4px 10px;
+}
+.seg.views button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chip.set {
+  background: #2c4a63;
+  color: #cfe8ff;
+}
+
+/* --- sheets (chord chart, piano score) --- */
+.sheet {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  row-gap: 6px;
+  padding: 6px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.sheet-bar .chip b {
+  color: var(--text);
+  font-weight: 600;
+}
+.chip.capo {
+  background: #5b4a1c;
+  color: #ffe8a3;
+}
+.chip.hand {
+  border-left: 3px solid;
+}
+.chip.hand.rh {
+  border-left-color: #ff6b8b;
+}
+.chip.hand.lh {
+  border-left-color: #4dabf7;
+}
+.chip.sizer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip.sizer button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0 4px;
+  color: var(--text);
+}
+.chip.sizer button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.sheet-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+}
+.sheet-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px 20px 60px;
+}
+.sheet-page.score {
+  max-width: 1300px;
+  padding: 18px 0 60px;
+}
+.sheet-title {
+  margin: 0;
+  font-size: 18px;
+  text-align: center;
+}
+.sheet-sub {
+  margin: 4px 0 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.sheet-empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 40px 0;
+  font-size: 13px;
+}
+.cs-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  row-gap: 10px;
+}
+.cs-bar {
+  position: relative;
+  min-width: 0;
+  padding: 1.1em 0.3em 0.5em 0.5em;
+  border: 0;
+  border-left: 2px solid var(--line);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: inherit;
+}
+.cs-bar:nth-child(4n) {
+  border-right: 2px solid var(--line);
+}
+.cs-bar:hover {
+  background: var(--panel);
+}
+.cs-bar.loop {
+  background: rgba(255, 255, 255, 0.04);
+}
+.cs-bar.loop.on {
+  background: rgba(255, 209, 102, 0.09);
+}
+.cs-bar.cur {
+  background: rgba(255, 107, 139, 0.14);
+}
+.cs-num {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  font-size: 10px;
+  color: #5d6577;
+}
+.cs-beats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  min-height: 1.5em;
+}
+.cs-chord {
+  font-weight: 600;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.cs-chord.held {
+  color: #5d6577;
+}
+.cs-chord.active {
+  color: var(--yellow);
+}
+.cs-chord small {
+  display: block;
+  font-size: 0.55em;
+  font-weight: 400;
+  color: var(--muted);
+}
+.cs-tick {
+  position: absolute;
+  bottom: 0;
+  width: 25%;
+  height: 3px;
+  background: var(--accent);
+}
+.score-paper {
+  color: var(--text);
+}
+.score-paper svg {
+  display: block;
+  margin: 0 auto;
+}
+.score-paper .abcjs-note,
+.score-paper .abcjs-rest {
+  cursor: pointer;
+}
+.score-paper .now.rh,
+.score-paper .now.rh path {
+  fill: #ff6b8b;
+  color: #ff6b8b;
+}
+.score-paper .now.lh,
+.score-paper .now.lh path {
+  fill: #4dabf7;
+  color: #4dabf7;
+}
+.keys-panel {
+  flex-shrink: 0;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  padding: 4px 14px 8px;
+}
+.keys-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: #5d6577;
+  padding-bottom: 4px;
+}
+.keyboard {
+  display: block;
+  width: 100%;
+  height: 96px;
+  border-radius: 4px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+@media print {
+  :root {
+    color-scheme: light;
+    background: #fff;
+    color: #000;
+    --text: #000;
+    --muted: #444;
+    --line: #999;
+  }
+  html,
+  body,
+  #root,
+  .app,
+  .workspace,
+  .sheet,
+  .sheet-scroll {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+  .topbar,
+  .preview,
+  .banner,
+  .transport,
+  .editbar,
+  .selbar,
+  .tracks,
+  .statusbar,
+  .sheet-bar,
+  .keys-panel,
+  .cs-tick,
+  .drawer-backdrop {
+    display: none !important;
+  }
+  .cs-bar,
+  .cs-bar.cur,
+  .cs-bar.loop.on {
+    background: transparent;
+  }
+  .cs-chord.held,
+  .cs-chord.active {
+    color: #000;
+  }
+  .score-paper .now,
+  .score-paper .now path {
+    fill: #000 !important;
+    color: #000 !important;
+  }
+  .cs-bar,
+  .score-paper svg {
+    break-inside: avoid;
+  }
+}
+
 .pianoroll {
   flex: 1;
   min-width: 0;

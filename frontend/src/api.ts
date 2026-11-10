@@ -54,7 +54,10 @@ export const api = {
   reanalyzeChords: (id: string, changePenalty: number) =>
     post(`/api/jobs/${id}/chords`, { change_penalty: changePenalty }).then(json<ChordResult>),
   fileUrl: (jobId: string, path: string) => `/files/${jobId}/${path}`,
-  stretchUrl: (jobId: string, path: string, speed: number) =>
-    `/api/jobs/${jobId}/audio?path=${encodeURIComponent(path)}&speed=${speed}`,
+  /** Audio at a playback speed (pitch kept) and transposed by `pitch` semitones (tempo kept) */
+  audioUrl: (jobId: string, path: string, speed: number, pitch: number) =>
+    speed === 1 && pitch === 0
+      ? `/files/${jobId}/${path}`
+      : `/api/jobs/${jobId}/audio?path=${encodeURIComponent(path)}&speed=${speed}&pitch=${pitch}`,
   musicxmlUrl: (jobId: string, track: string) => `/api/jobs/${jobId}/musicxml?track=${track}`,
 }

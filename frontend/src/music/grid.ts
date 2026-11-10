@@ -33,6 +33,21 @@ export function beatIndex(grid: BeatGrid, t: number): number {
   return lo
 }
 
+/** Time -> fractional beat index (inverse of timeAtBeat) */
+export function beatPos(grid: BeatGrid, t: number): number {
+  const i = beatIndex(grid, t)
+  const b0 = grid.beats[i]
+  const b1 = grid.beats[i + 1] ?? b0 + grid.period
+  return i + (t - b0) / (b1 - b0)
+}
+
+/** Fractional beat index -> time (extrapolates past either end) */
+export function timeAtBeat(grid: BeatGrid, pos: number): number {
+  const b = grid.beats
+  const i = Math.max(0, Math.min(b.length - 2, Math.floor(pos)))
+  return b[i] + (pos - i) * (b[i + 1] - b[i])
+}
+
 /** Nearest position on the grid dividing each beat into div parts (unchanged if div=0) */
 export function snapTime(grid: BeatGrid, t: number, div: number): number {
   if (div <= 0) return t

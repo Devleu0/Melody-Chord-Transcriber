@@ -80,9 +80,8 @@ export class AudioEngine {
     this.duration = Math.max(this.duration, buffer.duration)
   }
 
-  /** Change playback speed. urls are each track's audio converted to that speed */
+  /** Swap in another version of the audio (speed and/or transposition). urls are each track's converted audio */
   async setRate(rate: number, urls: Map<string, string>) {
-    if (rate === this.rate) return
     const wasPlaying = this.isPlaying
     const buffers = await Promise.all([...urls].map(async ([id, url]) => [id, await this.fetchBuffer(url)] as const))
     const pos = this.currentTime

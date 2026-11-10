@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api'
 import { AudioEngine, type LoopRange } from './audio/engine'
+import { ChordSheet } from './components/ChordSheet'
 import { HistoryPanel } from './components/HistoryPanel'
 import { InputPreview } from './components/InputPreview'
 import { PianoRoll, type PianoRollHandle } from './components/PianoRoll'
+import { PIANO_DEFAULTS, PianoScore, type PianoPrefs } from './components/PianoScore'
 import { TrackPanel } from './components/TrackPanel'
 import { useI18n, type MsgKey } from './i18n'
-import { chordToNotes, leadSheet } from './music/chords'
+import { chordName, chordToNotes, leadSheet } from './music/chords'
 import { fmtTime, pitchName } from './music/format'
 import { beatIndex, makeGrid, snapTime, stepAt } from './music/grid'
 import { ALL_KEYS, detectKey, keyId, keyName, parseKeyId } from './music/key'
-import type { Job, Note, Result, Separator, ServerInfo, TrackData, TrackState } from './types'
+import { MAX_CAPO, MAX_TRANSPOSE, recommendCapo, shiftChords, shiftKey } from './music/transpose'
+import type { Chord, Job, Note, Result, Separator, ServerInfo, TrackData, TrackState } from './types'
 import { assess, classifyUrl, readAudioDuration, type Preview } from './validate'
 
 const TRACK_COLORS: Record<string, string> = {
@@ -34,6 +37,10 @@ const fmtSize = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
 const SPEEDS = [0.5, 0.6, 0.75, 0.9, 1]
 const SNAPS = [0, 1, 2, 4]
+type View = 'roll' | 'chords' | 'piano'
+const VIEWS: View[] = ['roll', 'chords', 'piano']
+const TRANSPOSES = Array.from({ length: MAX_TRANSPOSE * 2 + 1 }, (_, i) => i - MAX_TRANSPOSE)
+const CAPOS = Array.from({ length: MAX_CAPO + 1 }, (_, i) => i)
 const PEAKS_RATE = 200
 
 function loadPref<T>(key: string, fallback: T): T {
@@ -99,6 +106,12 @@ export default function App() {
   const [master, setMaster] = useState(() => loadPref('master', 0.8))
   const [showWave, setShowWave] = useState(() => loadPref('showWave', true))
   const [keyChoice, setKeyChoice] = useState<string>('auto') // 'auto' | 'off' | keyId
+  // Playing-along views and settings
+  const [view, setView] = useState<View>(() => loadPref<View>('view', 'roll'))
+  const [transpose, setTranspose] = useState(0) // semitones; audio, notes and chords all move together
+  const [capo, setCapo] = useState(0) // guitar capo fret: changes chord names only
+  const [sheetSize, setSheetSize] = useState(() => loadPref('sheetSize', 2))
+  const [pianoPrefs, setPianoPrefs] = useState<PianoPrefs>(() => ({ ...PIANO_DEFAULTS, ...loadPref('piano', {}) }))
   const [peaks, setPeaks] = useState<Float32Array | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -115,7 +128,7 @@ export default function App() {
 
   const job = jobs.find((j) => j.id === jobId) ?? null
   const running = !!job && job.status !== 'done' && job.status !== 'error'
-  const chords = result?.chords?.chords ?? []
+  const origChords = result?.chords?.chords
 
   const grid = useMemo(() => makeGrid(result?.beats ?? [], duration || 1), [result?.beats, duration])
   // Estimate the key from every transcribed note
@@ -123,8 +136,42 @@ export default function App() {
     () => (result ? detectKey(result.tracks.flatMap((tr) => tr.notes ?? [])) : null),
     [result],
   )
-  const scaleKey = keyChoice === 'off' ? null : keyChoice === 'auto' ? detectedKey : parseKeyId(keyChoice)
-  const nameKey = scaleKey ?? detectedKey
+  const origScaleKey = keyChoice === 'off' ? null : keyChoice === 'auto' ? detectedKey : parseKeyId(keyChoice)
+  const origKey = origScaleKey ?? detectedKey
+  // Everything below the transport works on the transposed ("sounding") song
+  const scaleKey = useMemo(() => shiftKey(origScaleKey, transpose), [origScaleKey?.tonic, origScaleKey?.mode, transpose]) // eslint-disable-line react-hooks/exhaustive-deps
+  const nameKey = useMemo(() => shiftKey(origKey, transpose), [origKey?.tonic, origKey?.mode, transpose]) // eslint-disable-line react-hooks/exhaustive-deps
+  const chords = useMemo(() => shiftChords(origChords ?? [], transpose), [origChords, transpose])
+  // With a capo the guitarist fingers shapes `capo` semitones lower
+  const shapeKey = useMemo(() => shiftKey(nameKey, -capo), [nameKey, capo])
+  const shapes = useMemo(() => shiftChords(chords, -capo), [chords, capo])
+  const bestCapo = useMemo(() => recommendCapo(chords), [chords])
+  const chordLabel = useMemo(() => {
+    const shapeOf = new Map(chords.map((c, i) => [c, shapes[i]]))
+    return (c: Chord) => chordName(shapeOf.get(c) ?? c, shapeKey)
+  }, [chords, shapes, shapeKey])
+  // Transposed copies of the notes, with lookups both ways so edits land on the stored notes
+  const { tracks, toOrig, toView } = useMemo(() => {
+    const toOrig = new Map<Note, Note>()
+    const toView = new Map<Note, Note>()
+    const src = result?.tracks ?? []
+    if (!transpose) return { tracks: src, toOrig, toView }
+    const tracks = src.map((tr) => {
+      if (!tr.notes) return tr
+      const notes = tr.notes.map((n) => {
+        const v = { ...n, pitch: n.pitch + transpose }
+        toOrig.set(v, n)
+        toView.set(n, v)
+        return v
+      })
+      const pitch_curve = tr.pitch_curve && {
+        fps: tr.pitch_curve.fps,
+        values: tr.pitch_curve.values.map((v) => (v == null ? null : v + transpose)),
+      }
+      return { ...tr, notes, pitch_curve }
+    })
+    return { tracks, toOrig, toView }
+  }, [result?.tracks, transpose])
 
   const refreshJobs = useCallback(() => api.listJobs().then(setJobs).catch(() => {}), [])
 
@@ -301,6 +348,10 @@ export default function App() {
       setLoop(null)
       setLoopOn(false)
       setSpeed(1)
+      // transposition and capo are remembered per song
+      const perf = loadPref(`perf.${res.job_id}`, { transpose: 0, capo: 0 })
+      setTranspose(perf.transpose)
+      setCapo(perf.capo)
       setKeyChoice('auto')
       setPeaks(null)
       setDuration(res.meta.duration ?? 0)
@@ -327,7 +378,9 @@ export default function App() {
       )
       setLoadingAudio(true)
       try {
-        await Promise.all(res.tracks.map((tr) => eng.loadAudio(tr.id, api.fileUrl(res.job_id, tr.audio))))
+        await Promise.all(
+          res.tracks.map((tr) => eng.loadAudio(tr.id, api.audioUrl(res.job_id, tr.audio, 1, perf.transpose))),
+        )
         if (cancelled) return
         setDuration(eng.duration)
         setPeaks(eng.peaks('mix', PEAKS_RATE))
@@ -344,9 +397,9 @@ export default function App() {
   // Transcribed notes and chords -> engine synth tracks
   useEffect(() => {
     if (!engine || !result) return
-    for (const tr of result.tracks) if (tr.notes) engine.setNotes(tr.id, tr.notes)
-    engine.setNotes('chords', chordToNotes(result.chords?.chords ?? []))
-  }, [engine, result])
+    for (const tr of tracks) if (tr.notes) engine.setNotes(tr.id, tr.notes)
+    engine.setNotes('chords', chordToNotes(chords))
+  }, [engine, result, tracks, chords])
 
   // Mixer state -> engine gains
   useEffect(() => {
@@ -370,21 +423,27 @@ export default function App() {
 
   useEffect(() => savePref('showWave', showWave), [showWave])
   useEffect(() => savePref('snapDiv', snapDiv), [snapDiv])
+  useEffect(() => savePref('view', view), [view])
+  useEffect(() => savePref('sheetSize', sheetSize), [sheetSize])
+  useEffect(() => savePref('piano', pianoPrefs), [pianoPrefs])
+  const loadedJob = result?.job_id
+  useEffect(() => {
+    if (loadedJob) savePref(`perf.${loadedJob}`, { transpose, capo })
+  }, [loadedJob, transpose, capo])
 
-  async function changeSpeed(next: number) {
+  /** Load the audio for a playback speed and transposition (the server converts and caches it) */
+  async function changeAudio(nextSpeed: number, nextTranspose: number) {
     const eng = engineRef.current
     if (!eng || !result) return
     setSpeedLoading(true)
     setError(null)
     try {
       const urls = new Map(
-        result.tracks.map((tr) => [
-          tr.id,
-          next === 1 ? api.fileUrl(result.job_id, tr.audio) : api.stretchUrl(result.job_id, tr.audio, next),
-        ]),
+        result.tracks.map((tr) => [tr.id, api.audioUrl(result.job_id, tr.audio, nextSpeed, nextTranspose)]),
       )
-      await eng.setRate(next, urls)
-      setSpeed(next)
+      await eng.setRate(nextSpeed, urls)
+      setSpeed(nextSpeed)
+      setTranspose(nextTranspose)
     } catch (e) {
       setError(String(e))
     } finally {
@@ -447,12 +506,26 @@ export default function App() {
     setLoopOn(!!r)
   }, [])
 
+  // Release a dropdown once a value is picked, so Space and the other shortcuts work again
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      if (e.target instanceof HTMLSelectElement) e.target.blur()
+    }
+    document.addEventListener('change', onChange)
+    return () => document.removeEventListener('change', onChange)
+  }, [])
+
   // Refresh the time readout while playing
   useEffect(() => {
     if (!playing) return
     const timer = window.setInterval(() => setTime(engineRef.current?.currentTime ?? 0), 100)
     return () => window.clearInterval(timer)
   }, [playing])
+
+  const switchView = useCallback((v: View) => {
+    setView(v)
+    if (v !== 'roll') setEditMode(false) // notes are edited in the piano roll only
+  }, [])
 
   const togglePlay = useCallback(() => {
     const eng = engineRef.current
@@ -496,7 +569,9 @@ export default function App() {
       } else if (e.code === 'Escape') {
         if (selected) setSelected(null)
         else changeLoop(null)
-      } else if (e.code === 'KeyE' && result) {
+      } else if (['Digit1', 'Digit2', 'Digit3'].includes(e.code) && result) {
+        switchView(VIEWS[Number(e.code.slice(5)) - 1])
+      } else if (e.code === 'KeyE' && result && view === 'roll') {
         setEditMode((v) => !v)
       } else if (e.code === 'KeyQ' && editMode) {
         quantize()
@@ -519,7 +594,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePlay, seekTo, loop, loopOn, selected, editMode, editTrack, result, grid, undoRedo, quantize, onEditNote, changeLoop])
+  }, [togglePlay, seekTo, loop, loopOn, selected, editMode, editTrack, result, grid, undoRedo, quantize, onEditNote, changeLoop, view, switchView])
 
   const pickFile = useCallback(
     (f: File | undefined) => {
@@ -729,6 +804,13 @@ export default function App() {
         <span className="time">
           {fmtTime(time)} / {fmtTime(duration)}
         </span>
+        <div className="seg views" role="group" aria-label={t('tp.view')} title={t('tp.view.title')}>
+          {VIEWS.map((v) => (
+            <button key={v} className={view === v ? 'on' : ''} disabled={!result} onClick={() => switchView(v)}>
+              {t(`tp.view.${v}` as MsgKey)}
+            </button>
+          ))}
+        </div>
         {result && <span className="chip">♩ {result.tempo.toFixed(1)} BPM</span>}
         <button
           className={`chip btn ${loopOn ? 'active' : ''}`}
@@ -744,7 +826,7 @@ export default function App() {
           <select
             value={speed}
             disabled={!engine || loadingAudio || speedLoading}
-            onChange={(e) => void changeSpeed(Number(e.target.value))}
+            onChange={(e) => void changeAudio(Number(e.target.value), transpose)}
           >
             {SPEEDS.map((s) => (
               <option key={s} value={s}>
@@ -752,7 +834,6 @@ export default function App() {
               </option>
             ))}
           </select>
-          {speedLoading && ' …'}
         </label>
         <label className="chip" title={t('tp.key.title')}>
           {t('tp.key')}{' '}
@@ -769,18 +850,56 @@ export default function App() {
             ))}
           </select>
         </label>
+        <label className={`chip ${transpose ? 'set' : ''}`} title={t('tp.transpose.title')}>
+          {t('tp.transpose')}{' '}
+          <select
+            value={transpose}
+            disabled={!engine || loadingAudio || speedLoading}
+            onChange={(e) => void changeAudio(speed, Number(e.target.value))}
+          >
+            {TRANSPOSES.map((n) => {
+              const k = shiftKey(origKey, n)
+              return (
+                <option key={n} value={n}>
+                  {n > 0 ? `+${n}` : n === 0 ? `0 (${t('tp.transpose.orig')})` : `−${-n}`}
+                  {k ? ` → ${keyName(k)}` : ''}
+                </option>
+              )
+            })}
+          </select>
+        </label>
+        <label className={`chip ${capo ? 'set' : ''}`} title={t('tp.capo.title')}>
+          {t('tp.capo')}{' '}
+          <select value={capo} disabled={!result} onChange={(e) => setCapo(Number(e.target.value))}>
+            {CAPOS.map((n) => {
+              const k = shiftKey(nameKey, -n)
+              return (
+                <option key={n} value={n}>
+                  {n === 0 ? t('tp.capo.none') : k ? t('tp.capo.fret', { n, key: keyName(k) }) : n}
+                  {n === bestCapo && chords.length ? ' ★' : ''}
+                </option>
+              )
+            })}
+          </select>
+        </label>
+        {speedLoading && <span className="chip">{t('tp.converting')}</span>}
         <label className="chip check">
           <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> {t('tp.follow')}
         </label>
         <label className="chip check">
           <input type="checkbox" checked={showWave} onChange={(e) => setShowWave(e.target.checked)} /> {t('tp.wave')}
         </label>
-        <button className="chip btn" disabled={!result} onClick={() => rollRef.current?.fitPitch()} title={t('tp.fit.title')}>
+        <button
+          className="chip btn"
+          disabled={!result || view !== 'roll'}
+          onClick={() => rollRef.current?.fitPitch()}
+          title={t('tp.fit.title')}
+        >
           {t('tp.fit')}
         </button>
         <button
           className={`chip btn ${editMode ? 'active' : ''}`}
-          disabled={!result}
+          disabled={!result || view !== 'roll'}
           onClick={() => setEditMode((v) => !v)}
           title={t('tp.edit.title')}
         >
@@ -818,7 +937,11 @@ export default function App() {
                   onClick={() =>
                     download(
                       'leadsheet.txt',
-                      leadSheet(chords, grid, nameKey, { title: result.meta.title, tempo: result.tempo }),
+                      leadSheet(shapes, grid, shapeKey, {
+                        title: result.meta.title,
+                        tempo: result.tempo,
+                        note: capo && nameKey ? t('ex.capoNote', { n: capo, key: keyName(nameKey) }) : undefined,
+                      }),
                     )
                   }
                 >
@@ -835,7 +958,7 @@ export default function App() {
         )}
       </div>
 
-      {editMode && result && (
+      {editMode && result && view === 'roll' && (
         <div className="editbar">
           <span className="chip">
             {t('ed.target')}
@@ -873,7 +996,7 @@ export default function App() {
 
       {selected && (
         <div className="selbar">
-          {pitchName(selected.note.pitch)} · {selected.note.start.toFixed(2)}s ~ {selected.note.end.toFixed(2)}s · vel{' '}
+          {pitchName(selected.note.pitch + transpose)} · {selected.note.start.toFixed(2)}s ~ {selected.note.end.toFixed(2)}s · vel{' '}
           {selected.note.velocity} · {trackLabel(selected.track)}
         </div>
       )}
@@ -894,23 +1017,61 @@ export default function App() {
               chords={result.chords ?? null}
               onReanalyzeChords={(p) => void reanalyzeChords(p)}
             />
+            {view === 'chords' && (
+              <ChordSheet
+                engine={engine}
+                title={result.meta.title ?? ''}
+                tempo={result.tempo}
+                chords={chords}
+                shapes={shapes}
+                soundKey={nameKey}
+                shapeKey={shapeKey}
+                capo={capo}
+                grid={grid}
+                follow={follow}
+                loop={loop}
+                loopOn={loopOn}
+                onLoopChange={changeLoop}
+                size={sheetSize}
+                onSize={setSheetSize}
+              />
+            )}
+            {view === 'piano' && (
+              <PianoScore
+                engine={engine}
+                title={result.meta.title ?? ''}
+                tracks={tracks}
+                chords={chords}
+                soundKey={nameKey}
+                grid={grid}
+                follow={follow}
+                loop={loop}
+                onLoopChange={changeLoop}
+                trackLabel={trackLabel}
+                prefs={pianoPrefs}
+                onPrefs={setPianoPrefs}
+              />
+            )}
+            {view === 'roll' && (
             <PianoRoll
               ref={rollRef}
               viewKey={result.job_id}
               engine={engine}
-              tracks={result.tracks}
+              tracks={tracks}
               states={labeledStates.filter((s) => s.id !== 'chords')}
               grid={grid}
               duration={duration}
               follow={follow}
-              selected={selected?.note ?? null}
-              onSelect={(note, track) => setSelected(note && track ? { note, track } : null)}
+              selected={selected ? (toView.get(selected.note) ?? selected.note) : null}
+              onSelect={(note, track) => setSelected(note && track ? { note: toOrig.get(note) ?? note, track } : null)}
               scaleKey={scaleKey}
               nameKey={nameKey}
               loop={loop}
               loopOn={loopOn}
               onLoopChange={changeLoop}
               chords={chords}
+              chordLabel={chordLabel}
+              capo={capo}
               showChords={chordState?.showNotes ?? true}
               peaks={peaks}
               peaksRate={PEAKS_RATE}
@@ -918,8 +1079,15 @@ export default function App() {
               editMode={editMode}
               editTrack={editTrack}
               snapDiv={snapDiv}
-              onEditNote={onEditNote}
+              onEditNote={(track, before, after) =>
+                onEditNote(
+                  track,
+                  before && (toOrig.get(before) ?? before),
+                  after && transpose ? { ...after, pitch: after.pitch - transpose } : after,
+                )
+              }
             />
+            )}
           </>
         ) : (
           <div className="empty">

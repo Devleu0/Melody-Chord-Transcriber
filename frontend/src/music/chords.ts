@@ -95,16 +95,52 @@ export function chordToNotes(chords: Chord[]): Note[] {
   return notes.sort((a, b) => a.start - b.start)
 }
 
+export const sameChord = (a: Chord | null, b: Chord | null) =>
+  a === b || (!!a && !!b && a.root === b.root && a.quality === b.quality && a.bass === b.bass)
+
+/** One 4/4 bar of the chord chart: which chord starts on which beat */
+export interface ChordBar {
+  number: number // 1-based; <= 0 for pickup bars before the first detected beat
+  beat: number // grid beat index of the bar start
+  start: number
+  end: number
+  segs: { beat: number; len: number; chord: Chord | null }[] // beat 0..3, consecutive, covering the bar
+}
+
+/** Chords laid out per bar on the beat grid (a beat takes the chord sounding at its middle). Empty ends are trimmed. */
+export function chordBars(chords: Chord[], grid: BeatGrid): ChordBar[] {
+  const bars: ChordBar[] = []
+  const b = grid.beats
+  let ci = 0
+  for (let i = grid.firstIndex % 4; i + 4 < b.length; i += 4) {
+    const segs: ChordBar['segs'] = []
+    for (let k = 0; k < 4; k++) {
+      const mid = (b[i + k] + b[i + k + 1]) / 2
+      while (ci < chords.length && chords[ci].end <= mid) ci++
+      const c = ci < chords.length && chords[ci].start <= mid ? chords[ci] : null
+      const last = segs[segs.length - 1]
+      if (last && sameChord(last.chord, c)) last.len++
+      else segs.push({ beat: k, len: 1, chord: c })
+    }
+    bars.push({ number: (i - grid.firstIndex) / 4 + 1, beat: i, start: b[i], end: b[i + 4], segs })
+  }
+  const empty = (bar: ChordBar) => bar.segs.every((s) => !s.chord)
+  while (bars.length && empty(bars[bars.length - 1])) bars.pop()
+  while (bars.length && empty(bars[0])) bars.shift()
+  return bars
+}
+
 /** Text lead sheet of chords per bar (4/4) */
 export function leadSheet(
   chords: Chord[],
   grid: BeatGrid,
   key: Key | null,
-  meta: { title?: string; tempo: number },
+  meta: { title?: string; tempo: number; note?: string },
 ): string {
   const lines = [
     meta.title ?? 'Untitled',
     `Key: ${key ? keyName(key) : '?'}   Tempo: ${meta.tempo.toFixed(0)} BPM   (4/4, 1 bar = 4 detected beats)`,
+    ...(meta.note ? [meta.note] : []),
     '',
   ]
   const bars: string[] = []

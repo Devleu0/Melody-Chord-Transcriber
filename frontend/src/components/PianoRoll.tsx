@@ -73,6 +73,9 @@ interface Props {
   loopOn: boolean
   onLoopChange: (r: LoopRange | null) => void
   chords: Chord[]
+  /** Name shown in the chord lane (the fingered shape when a capo is set) */
+  chordLabel: (c: Chord) => string
+  capo: number
   showChords: boolean
   peaks: Float32Array | null
   peaksRate: number
@@ -440,7 +443,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
           g.clip()
           g.fillStyle = '#14161a'
           g.font = '600 12px system-ui, sans-serif'
-          const name = chordName(c, nameKey)
+          const name = P.chordLabel(c)
           g.fillText(name, x + 5, top + CHORD_H / 2 + 4)
           const roman = romanNumeral(c, nameKey)
           if (roman && w > g.measureText(name).width + 34) {
@@ -590,7 +593,7 @@ export const PianoRoll = forwardRef<PianoRollHandle, Props>(function PianoRoll(p
         const c = hv.chord
         const roman = romanNumeral(c, nameKey)
         lines = [
-          `${chordName(c, nameKey)}${roman ? `  ·  ${roman}` : ''}`,
+          `${P.capo ? `${P.chordLabel(c)}  (${tr('roll.sounds', { n: P.capo, chord: chordName(c, nameKey) })})` : chordName(c, nameKey)}${roman ? `  ·  ${roman}` : ''}`,
           `${tr('roll.tones')}: ${c.pcs.map((pc) => pcName(pc, nameKey)).join(' ')}`,
           `${fmtTime(c.start)} – ${fmtTime(c.end)}  ·  ${tr('roll.clickLoop')}`,
         ]

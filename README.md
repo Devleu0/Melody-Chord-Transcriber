@@ -30,6 +30,11 @@ Everything runs on your machine. A 4 GB GPU is enough; CPU-only also works, just
 - **Chords**: BTC transformer (170 chord classes: 7ths, sus, dim, aug…), beat-synchronous smoothing and slash chords from the bass line. Roman numerals and function colors relative to the detected key.
 - **DAW-style piano roll**: vertical keyboard, bar ruler, chord lane, waveform, minimap, per-track mute / solo / volume, synth playback of the transcription on top of the original.
 - **Practice tools**: beat-snapped loop regions, pitch-preserving 0.5×–0.9× speed, scale highlighting that marks out-of-key notes.
+- **Sheets for players** (switch views with `1` / `2` / `3`)
+  - **Transpose**: ±6 semitones. The original audio is shifted too, so you can play along in the new key.
+  - **Capo**: pick a fret and chord names become the shapes you actually finger; the easiest position is marked ★.
+  - **Chord chart**: 4 bars per row, current bar highlighted, click to jump, Shift+click to loop, adjustable text size, print.
+  - **Piano score**: an automatic grand-staff arrangement with the melody in the right hand and chord accompaniment in the left. Choose each hand's part, the accompaniment pattern (held chords, every beat, bass–chord, arpeggio, roots), octave and rhythm resolution. A keyboard underneath shows the keys to press now and next; step note by note with `,` / `.`.
 - **Editing**: move / resize / add / delete notes, quantize, undo / redo, autosave. Re-transcribe a single track with different sensitivity in seconds.
 - **Export**: MIDI (all tracks + chord track), chord lead sheet (.txt), MusicXML (melody + chord symbols) for MuseScore and other notation apps.
 - **UI in English and Korean** (auto-detected, switchable).

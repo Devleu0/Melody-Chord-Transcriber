@@ -232,24 +232,63 @@ def get_musicxml(job_id: str, track: str = "vocals"):
     return FileResponse(out, media_type="application/vnd.recordare.musicxml+xml", filename=f"{track}.musicxml")
 
 
-SPEEDS = {0.5, 0.6, 0.75, 0.9}
+SPEEDS = {0.5, 0.6, 0.75, 0.9, 1.0}
+MAX_TRANSPOSE = 6  # semitones, either direction
+
+
+@functools.cache
+def _has_rubberband() -> bool:
+    """Whether this ffmpeg build has the rubberband filter (better pitch shifting than resampling)."""
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True).stdout
+    except OSError:
+        return False
+    return " rubberband " in out
+
+
+def _atempo(factor: float) -> str:
+    """atempo chain for any factor (a single atempo only goes down to 0.5)."""
+    parts = []
+    while factor < 0.5:
+        parts.append("atempo=0.5")
+        factor /= 0.5
+    parts.append(f"atempo={factor:.6f}")
+    return ",".join(parts)
+
+
+def _audio_filter(src: Path, speed: float, pitch: int) -> str:
+    if pitch == 0:
+        return _atempo(speed)
+    ratio = 2 ** (pitch / 12)
+    if _has_rubberband():
+        return f"rubberband=tempo={speed}:pitch={ratio:.6f}"
+    # Fallback: resample to shift the pitch, then undo the tempo change it causes
+    import soundfile as sf
+
+    sr = sf.info(str(src)).samplerate
+    return f"asetrate={round(sr * ratio)},aresample={sr},{_atempo(speed / ratio)}"
 
 
 @app.get("/api/jobs/{job_id}/audio")
-def get_stretched_audio(job_id: str, path: str, speed: float):
-    """Pitch-preserving tempo-changed audio (ffmpeg atempo). Cached in the job folder."""
+def get_stretched_audio(job_id: str, path: str, speed: float = 1.0, pitch: int = 0):
+    """Tempo-changed (pitch-preserving) and/or transposed (tempo-preserving) audio. Cached in the job folder."""
     if speed not in SPEEDS:
         raise HTTPException(400, f"speed must be one of {sorted(SPEEDS)}")
+    if abs(pitch) > MAX_TRANSPOSE:
+        raise HTTPException(400, f"pitch must be within ±{MAX_TRANSPOSE} semitones")
     job_dir = (DATA_DIR / job_id).resolve()
     src = (job_dir / path).resolve()
     if job_dir not in src.parents or src.suffix != ".wav" or not src.exists():
         raise HTTPException(404, "audio not found")
-    out = job_dir / "speed" / f"{speed}" / src.relative_to(job_dir)
+    if speed == 1.0 and pitch == 0:
+        return FileResponse(src, media_type="audio/wav")
+    variant = f"{speed}" if pitch == 0 else f"{speed}_p{pitch}"
+    out = job_dir / "speed" / variant / src.relative_to(job_dir)
     if not out.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".tmp.wav")
         proc = subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-filter:a", f"atempo={speed}", str(tmp)],
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-filter:a", _audio_filter(src, speed, pitch), str(tmp)],
             capture_output=True,
             text=True,
         )

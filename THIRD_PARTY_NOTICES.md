@@ -33,6 +33,7 @@ Melody Chord Transcriber itself is MIT-licensed (see [LICENSE](LICENSE)). It bui
 | [FastAPI](https://github.com/fastapi/fastapi) | MIT |
 | [React](https://github.com/facebook/react) | MIT |
 | [Vite](https://github.com/vitejs/vite) | MIT |
+| [abcjs](https://github.com/paulrosen/abcjs) (sheet music engraving) | MIT |
 | [FFmpeg](https://ffmpeg.org/) (external binary, not bundled) | LGPL/GPL |
 
 ## Demo media
